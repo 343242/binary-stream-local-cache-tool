@@ -1,0 +1,10 @@
+.codex
+.omc/
+.omx/
+.opencode/
+
+bin/
+dist/
+coverage/
+*.coverprofile
+*.test
