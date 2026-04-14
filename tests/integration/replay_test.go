@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"fastReadFile/pkg/cache"
 )
@@ -119,6 +122,76 @@ func TestReplayReturnsCursorCRCAndAckRejectsTamperedCursor(t *testing.T) {
 	tampered.CRC32++
 	if _, err := engine.Ack(context.Background(), "main-server", tampered); !errors.Is(err, cache.ErrCode(cache.ErrCursorInvalid)) {
 		t.Fatalf("Ack(tampered) error = %v, want cursor invalid", err)
+	}
+}
+
+func TestConcurrentWriteBatchAndReplay(t *testing.T) {
+	engine := mustOpenEngine(t)
+	defer engine.Close()
+
+	const totalRecords = 40
+	var wg sync.WaitGroup
+	writerDone := make(chan struct{})
+	errCh := make(chan error, 2)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(writerDone)
+		for i := 0; i < totalRecords; i++ {
+			if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+				{EventTimeUnixMs: int64(i + 1), Payload: []byte(fmt.Sprintf("payload-%02d", i+1))},
+			}); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		acked := 0
+		deadline := time.Now().Add(5 * time.Second)
+		for acked < totalRecords && time.Now().Before(deadline) {
+			batch, err := engine.Replay(context.Background(), "main-server", cache.ReplayLimit{MaxRecords: 5})
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if batch.RecordCount == 0 {
+				select {
+				case <-writerDone:
+				default:
+				}
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			if _, err := engine.Ack(context.Background(), "main-server", batch.NextCursor); err != nil {
+				errCh <- err
+				return
+			}
+			acked += batch.RecordCount
+		}
+		if acked != totalRecords {
+			errCh <- fmt.Errorf("acked = %d, want %d", acked, totalRecords)
+		}
+	}()
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent engine access error = %v", err)
+		}
+	}
+
+	batch, err := engine.Replay(context.Background(), "main-server", cache.ReplayLimit{MaxRecords: 5})
+	if err != nil {
+		t.Fatalf("Replay(final) error = %v", err)
+	}
+	if batch.RecordCount != 0 {
+		t.Fatalf("final RecordCount = %d, want %d", batch.RecordCount, 0)
 	}
 }
 

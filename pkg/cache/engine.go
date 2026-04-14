@@ -133,6 +133,9 @@ func (s *StorageEngine) WriteBatch(_ context.Context, records []RawRecord) (Writ
 		if err != nil {
 			return WriteBatchResult{}, err
 		}
+		if writeBatchHook != nil {
+			writeBatchHook("after_wal_append_before_segment")
+		}
 		appendResult, err := s.segments.AppendBlock(block.Bytes, segment.BlockMeta{
 			RecordCount:   uint64(len(block.RecordBytes)),
 			FirstWriteSeq: block.FirstWriteSeq,

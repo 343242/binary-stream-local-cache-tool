@@ -61,6 +61,10 @@ func (m *Manager) Replay(ctx context.Context, destination string, limit cache.Re
 			if err != nil {
 				break
 			}
+			if cursor.SegmentID == segmentID && uint64(offset) < cursor.BlockOffset {
+				offset += blockLen
+				continue
+			}
 			block, err := codec.ParseBlock(data[offset : offset+blockLen])
 			if err != nil {
 				return cache.ReplayBatch{}, cache.NewError(cache.ErrCorruption, "replay", path, "parse replay block", err)

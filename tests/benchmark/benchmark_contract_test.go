@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"testing"
+	"time"
 )
 
 func TestBenchmarkContract(t *testing.T) {
@@ -20,6 +22,15 @@ func TestBenchmarkContract(t *testing.T) {
 	if !bytes.Contains(output, []byte("replay_duration=")) {
 		t.Fatalf("output %q does not contain replay duration", output)
 	}
+	writeDuration := extractDuration(t, output, `write_duration=([^\s]+)`)
+	replayDuration := extractDuration(t, output, `replay_duration=([^\s]+)`)
+	const maxDuration = 500 * time.Millisecond
+	if writeDuration > maxDuration {
+		t.Fatalf("write_duration = %s, want <= %s", writeDuration, maxDuration)
+	}
+	if replayDuration > maxDuration {
+		t.Fatalf("replay_duration = %s, want <= %s", replayDuration, maxDuration)
+	}
 }
 
 func projectRoot(t *testing.T) string {
@@ -29,4 +40,17 @@ func projectRoot(t *testing.T) string {
 		t.Fatalf("Abs() error = %v", err)
 	}
 	return dir
+}
+
+func extractDuration(t *testing.T, output []byte, pattern string) time.Duration {
+	t.Helper()
+	matches := regexp.MustCompile(pattern).FindSubmatch(output)
+	if len(matches) != 2 {
+		t.Fatalf("output %q does not match %q", output, pattern)
+	}
+	duration, err := time.ParseDuration(string(matches[1]))
+	if err != nil {
+		t.Fatalf("ParseDuration(%q) error = %v", matches[1], err)
+	}
+	return duration
 }
