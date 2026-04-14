@@ -20,7 +20,7 @@ import (
 const maxPayloadSizeBytes = 16 << 20
 
 type StorageEngine struct {
-	mu                 sync.Mutex
+	mu                 sync.RWMutex
 	cfg                Config
 	closed             bool
 	closing            bool
@@ -36,6 +36,8 @@ type StorageEngine struct {
 	replayMgr          *replaystore.Manager
 	stats              *stats.Collector
 }
+
+var closeStepHook func(string)
 
 func Open(cfg Config) (*StorageEngine, error) {
 	cfg = withConfigDefaults(cfg)
@@ -82,6 +84,8 @@ func Open(cfg Config) (*StorageEngine, error) {
 		replayMgr:        replaystore.NewManager(cfg.RootDir, cursorStore),
 		stats:            collector,
 	}
+	collector.RecordSegmentTailRepair(state.SegmentTailRepairsTotal)
+	collector.RecordSegmentTailRepair(segments.TailRepairCount())
 	if len(entries) > 0 {
 		engine.batchSeq = entries[len(entries)-1].BatchSeq
 		engine.latestWALEndOffset = entries[len(entries)-1].EndOffset
@@ -98,8 +102,8 @@ func (s *StorageEngine) WriteBatch(_ context.Context, records []RawRecord) (Writ
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.closed || s.closing {
-		return WriteBatchResult{}, NewError(ErrClosed, "write_batch", s.cfg.RootDir, "storage engine is closed", nil)
+	if err := s.checkWritableStateLocked("write_batch"); err != nil {
+		return WriteBatchResult{}, err
 	}
 	if err := validateWriteBatch(records); err != nil {
 		return WriteBatchResult{}, err
@@ -158,6 +162,12 @@ func (s *StorageEngine) WriteBatch(_ context.Context, records []RawRecord) (Writ
 }
 
 func (s *StorageEngine) Replay(ctx context.Context, destination string, limit ReplayLimit) (ReplayBatch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checkReadableStateLocked("replay"); err != nil {
+		return ReplayBatch{}, err
+	}
 	batch, err := s.replayMgr.Replay(ctx, destination, limit)
 	if err != nil {
 		return ReplayBatch{}, err
@@ -167,6 +177,15 @@ func (s *StorageEngine) Replay(ctx context.Context, destination string, limit Re
 }
 
 func (s *StorageEngine) Ack(_ context.Context, destination string, cursor ReplayCursor) (AckResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checkReadableStateLocked("ack"); err != nil {
+		return AckResult{}, err
+	}
+	if err := replaystore.ValidateCursor(cursor); err != nil {
+		return AckResult{}, err
+	}
 	previous, err := s.cursorStore.Load(destination)
 	if err != nil {
 		return AckResult{}, err
@@ -184,17 +203,25 @@ func (s *StorageEngine) Ack(_ context.Context, destination string, cursor Replay
 }
 
 func (s *StorageEngine) Recover(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed || s.closing {
+		return NewError(ErrClosed, "recover", s.cfg.RootDir, "storage engine is closed", nil)
+	}
 	state, err := recovery.Recover(ctx, s.cfg.RootDir, s.cfg)
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.nextWriteSeq = state.NextWriteSeq
+	s.stats.RecordSegmentTailRepair(state.SegmentTailRepairsTotal)
 	return nil
 }
 
 func (s *StorageEngine) Stats(_ context.Context) (StatsSnapshot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	snapshot := s.stats.Snapshot()
 	snapshot.Capacity.RetentionDays = s.cfg.RetentionDays
 	snapshot.Capacity.NextWriteSeq = s.nextWriteSeq
@@ -203,39 +230,93 @@ func (s *StorageEngine) Stats(_ context.Context) (StatsSnapshot, error) {
 }
 
 func (s *StorageEngine) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.closeInternal(nil)
+}
 
+func (s *StorageEngine) Shutdown(ctx context.Context) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.closeInternal(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return NewError(ErrTimeout, "shutdown", s.cfg.RootDir, "shutdown context expired", ctx.Err())
+	}
+}
+
+func (s *StorageEngine) closeInternal(ctx context.Context) error {
+	s.mu.Lock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
+	if s.closing {
+		s.mu.Unlock()
+		return NewError(ErrShutdownInProgress, "close", s.cfg.RootDir, "shutdown already in progress", nil)
+	}
 	s.closing = true
-	if err := s.saveCheckpoint(time.Now()); err != nil {
+	s.mu.Unlock()
+
+	if err := s.checkContext(ctx); err != nil {
+		s.resetClosing()
 		return err
 	}
+
+	if err := s.runCloseStep(ctx, "before_checkpoint"); err != nil {
+		s.resetClosing()
+		return err
+	}
+
+	s.mu.Lock()
+	err := s.saveCheckpointLocked(time.Now())
+	s.mu.Unlock()
+	if err != nil {
+		s.resetClosing()
+		return err
+	}
+	if err := s.runCloseStep(ctx, "after_checkpoint"); err != nil {
+		s.resetClosing()
+		return err
+	}
+
 	if s.segments != nil {
+		if err := s.runCloseStep(ctx, "before_segment_close"); err != nil {
+			s.resetClosing()
+			return err
+		}
 		if err := s.segments.Close(); err != nil {
+			s.resetClosing()
 			return err
 		}
 	}
 	if s.walLog != nil {
+		if err := s.runCloseStep(ctx, "before_wal_close"); err != nil {
+			s.resetClosing()
+			return err
+		}
 		if err := s.walLog.Close(); err != nil {
+			s.resetClosing()
 			return err
 		}
 	}
-	if err := writeLifecycleState(s.cfg.RootDir, lifecycleStateClean); err != nil {
+	if err := s.runCloseStep(ctx, "before_lifecycle_write"); err != nil {
+		s.resetClosing()
 		return err
 	}
-	s.stats.RecordGracefulShutdown()
-	s.closed = true
-	return nil
-}
-
-func (s *StorageEngine) Shutdown(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return NewError(ErrTimeout, "shutdown", s.cfg.RootDir, "shutdown context expired", err)
+	if err := writeLifecycleState(s.cfg.RootDir, lifecycleStateClean); err != nil {
+		s.resetClosing()
+		return err
 	}
-	return s.Close()
+
+	s.mu.Lock()
+	s.closed = true
+	s.closing = false
+	s.mu.Unlock()
+	s.stats.RecordGracefulShutdown()
+	return nil
 }
 
 func withConfigDefaults(cfg Config) Config {
@@ -345,22 +426,22 @@ func (s *StorageEngine) maybeSaveCheckpoint(now time.Time, force bool) error {
 		return nil
 	}
 	if force {
-		return s.saveCheckpoint(now)
+		return s.saveCheckpointLocked(now)
 	}
 	if s.cfg.CheckpointBytes > 0 && s.latestWALEndOffset-s.lastCheckpoint.LastWALEndOffset >= s.cfg.CheckpointBytes {
-		return s.saveCheckpoint(now)
+		return s.saveCheckpointLocked(now)
 	}
 	if s.cfg.CheckpointInterval > 0 && now.Sub(s.lastCheckpointAt) >= s.cfg.CheckpointInterval {
-		return s.saveCheckpoint(now)
+		return s.saveCheckpointLocked(now)
 	}
 	return nil
 }
 
-func (s *StorageEngine) saveCheckpoint(now time.Time) error {
+func (s *StorageEngine) saveCheckpointLocked(now time.Time) error {
 	if s.checkpointStore == nil {
 		return nil
 	}
-	if err := s.syncActiveSegment(); err != nil {
+	if err := s.syncActiveSegmentLocked(); err != nil {
 		return err
 	}
 	checkpoint := wal.Checkpoint{
@@ -373,27 +454,62 @@ func (s *StorageEngine) saveCheckpoint(now time.Time) error {
 	}
 	s.lastCheckpoint = checkpoint
 	s.lastCheckpointAt = now
+	s.stats.RecordCheckpoint()
 	return nil
 }
 
-func (s *StorageEngine) syncActiveSegment() error {
+func (s *StorageEngine) syncActiveSegmentLocked() error {
 	if s.segments == nil {
 		return nil
 	}
-	segmentID := s.segments.CurrentSegmentID()
-	if segmentID == 0 {
-		return nil
+	if err := s.segments.SyncActive(); err != nil {
+		return err
 	}
-	path := filepath.Join(s.cfg.RootDir, "segments", fmt.Sprintf("%06d.seg", segmentID))
-	file, err := os.Open(path)
-	if err != nil {
-		return NewError(ErrIO, "sync_active_segment", path, "open active segment for fsync", err)
+	s.stats.RecordSegmentFsync()
+	return nil
+}
+
+func (s *StorageEngine) checkWritableStateLocked(op string) error {
+	if s.closed {
+		return NewError(ErrClosed, op, s.cfg.RootDir, "storage engine is closed", nil)
 	}
-	defer file.Close()
-	if err := file.Sync(); err != nil {
-		return NewError(ErrIO, "sync_active_segment", path, "fsync active segment", err)
+	if s.closing {
+		return NewError(ErrShutdownInProgress, op, s.cfg.RootDir, "shutdown in progress", nil)
 	}
 	return nil
+}
+
+func (s *StorageEngine) checkReadableStateLocked(op string) error {
+	if s.closed {
+		return NewError(ErrClosed, op, s.cfg.RootDir, "storage engine is closed", nil)
+	}
+	if s.closing {
+		return NewError(ErrShutdownInProgress, op, s.cfg.RootDir, "shutdown in progress", nil)
+	}
+	return nil
+}
+
+func (s *StorageEngine) resetClosing() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closing = false
+}
+
+func (s *StorageEngine) checkContext(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return NewError(ErrTimeout, "shutdown", s.cfg.RootDir, "shutdown context expired", err)
+	}
+	return nil
+}
+
+func (s *StorageEngine) runCloseStep(ctx context.Context, step string) error {
+	if closeStepHook != nil {
+		closeStepHook(step)
+	}
+	return s.checkContext(ctx)
 }
 
 type builtBlock struct {

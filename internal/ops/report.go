@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"fastReadFile/internal/codec"
+	"fastReadFile/internal/recovery"
 	"fastReadFile/internal/replay"
 	"fastReadFile/internal/segment"
 	"fastReadFile/internal/wal"
@@ -90,26 +91,7 @@ func Verify(root string) (string, error) {
 
 func RepairTail(root string, segmentID uint64) (string, error) {
 	path := filepath.Join(root, "segments", formatSegmentID(segmentID)+".seg")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	if footer, ok := recoverFooterWithTail(path, data); ok {
-		size := int64(footer.DataEndOffset) + segment.FooterSize
-		if err := os.Truncate(path, size); err != nil {
-			return "", err
-		}
-		return "repaired", nil
-	}
-	validEnd := 0
-	for validEnd < len(data) {
-		blockLen, err := codec.BlockLength(data[validEnd:])
-		if err != nil {
-			break
-		}
-		validEnd += blockLen
-	}
-	if err := os.Truncate(path, int64(validEnd)); err != nil {
+	if _, err := recovery.RepairSegmentTail(root, path); err != nil {
 		return "", err
 	}
 	return "repaired", nil

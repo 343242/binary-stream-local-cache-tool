@@ -64,6 +64,40 @@ func TestCachectlCommands(t *testing.T) {
 	assertCommandContains(t, root, []string{"inspect-segment", "--segment", "1"}, "SegmentID")
 }
 
+func TestCachectlRepairTailMatchesRecoveryBoundaryForPartialActiveSegment(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	firstBlock := mustBuildBlock(t, 1, [][]byte{[]byte("x")}, []int64{10})
+	secondBlock := mustBuildBlock(t, 2, [][]byte{[]byte("y")}, []int64{11})
+	path := filepath.Join(root, "segments", "000001.seg")
+	if err := os.WriteFile(path, append(append([]byte{}, firstBlock...), secondBlock[:len(secondBlock)-3]...), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	assertCommandContains(t, root, []string{"repair-tail", "--segment", "1"}, "repaired")
+	repaired, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if len(repaired) != len(firstBlock) {
+		t.Fatalf("len(repaired) = %d, want %d", len(repaired), len(firstBlock))
+	}
+}
+
 func assertCommandContains(t *testing.T, root string, args []string, want string) {
 	t.Helper()
 

@@ -36,6 +36,18 @@ func (c *Collector) RecordAck(writeSeq uint64) {
 	c.snapshot.Replay.LastAckedWriteSeq = writeSeq
 }
 
+func (c *Collector) RecordCheckpoint() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.snapshot.IO.CheckpointsTotal++
+}
+
+func (c *Collector) RecordSegmentFsync() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.snapshot.IO.SegmentFsyncTotal++
+}
+
 func (c *Collector) RecordUngracefulRecovery() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -46,6 +58,12 @@ func (c *Collector) RecordGracefulShutdown() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.snapshot.Health.GracefulShutdownsTotal++
+}
+
+func (c *Collector) RecordSegmentTailRepair(count uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.snapshot.Health.SegmentTailRepairsTotal += count
 }
 
 func (c *Collector) Snapshot() cache.StatsSnapshot {

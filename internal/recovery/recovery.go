@@ -16,8 +16,9 @@ import (
 )
 
 type State struct {
-	NextWriteSeq    uint64
-	ActiveSegmentID uint64
+	NextWriteSeq            uint64
+	ActiveSegmentID         uint64
+	SegmentTailRepairsTotal uint64
 }
 
 func Recover(ctx context.Context, root string, _ cache.Config) (State, error) {
@@ -36,6 +37,7 @@ func Recover(ctx context.Context, root string, _ cache.Config) (State, error) {
 	maxWriteSeq := uint64(0)
 	maxSegmentID := uint64(0)
 	activeSegmentPath := ""
+	tailRepairs := uint64(0)
 
 	segmentPaths, err := listSegmentPaths(filepath.Join(root, "segments"))
 	if err != nil {
@@ -57,9 +59,11 @@ func Recover(ctx context.Context, root string, _ cache.Config) (State, error) {
 		footer, footerErr := segment.ReadFooter(segmentPath)
 		if footerErr == nil {
 			expectedSize := int64(footer.DataEndOffset) + segment.FooterSize
-			if err := truncateIfLarger(segmentPath, expectedSize); err != nil {
+			repaired, err := truncateIfLarger(segmentPath, expectedSize)
+			if err != nil {
 				return State{}, err
 			}
+			tailRepairs += repaired
 			data, err := os.ReadFile(segmentPath)
 			if err != nil {
 				return State{}, cache.NewError(cache.ErrIO, "recover", segmentPath, "read sealed segment", err)
@@ -71,9 +75,11 @@ func Recover(ctx context.Context, root string, _ cache.Config) (State, error) {
 		}
 		if recoveredFooter, recovered := recoverFooterWithTail(segmentPath); recovered {
 			expectedSize := int64(recoveredFooter.DataEndOffset) + segment.FooterSize
-			if err := truncateIfLarger(segmentPath, expectedSize); err != nil {
+			repaired, err := truncateIfLarger(segmentPath, expectedSize)
+			if err != nil {
 				return State{}, err
 			}
+			tailRepairs += repaired
 			data, err := os.ReadFile(segmentPath)
 			if err != nil {
 				return State{}, cache.NewError(cache.ErrIO, "recover", segmentPath, "read recovered-footer segment", err)
@@ -84,13 +90,16 @@ func Recover(ctx context.Context, root string, _ cache.Config) (State, error) {
 			continue
 		}
 
-		validEnd, err := absorbSegmentFile(segmentPath, knownRecords, &maxWriteSeq)
+		validEnd, repaired, err := absorbSegmentFile(segmentPath, knownRecords, &maxWriteSeq)
 		if err != nil {
 			return State{}, err
 		}
-		if err := truncateIfLarger(segmentPath, validEnd); err != nil {
+		tailRepairs += repaired
+		repaired, err = truncateIfLarger(segmentPath, validEnd)
+		if err != nil {
 			return State{}, err
 		}
+		tailRepairs += repaired
 		if segmentID >= maxSegmentID {
 			activeSegmentPath = segmentPath
 		}
@@ -162,8 +171,9 @@ func Recover(ctx context.Context, root string, _ cache.Config) (State, error) {
 	}
 
 	return State{
-		NextWriteSeq:    maxWriteSeq + 1,
-		ActiveSegmentID: activeSegmentID,
+		NextWriteSeq:            maxWriteSeq + 1,
+		ActiveSegmentID:         activeSegmentID,
+		SegmentTailRepairsTotal: tailRepairs,
 	}, nil
 }
 
@@ -196,16 +206,19 @@ func recoverFooterWithTail(path string) (segment.Footer, bool) {
 	return segment.Footer{}, false
 }
 
-func absorbSegmentFile(path string, knownRecords map[uint64]uint32, maxWriteSeq *uint64) (int64, error) {
+func absorbSegmentFile(path string, knownRecords map[uint64]uint32, maxWriteSeq *uint64) (int64, uint64, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, cache.NewError(cache.ErrIO, "recover", path, "read active segment", err)
+		return 0, 0, cache.NewError(cache.ErrIO, "recover", path, "read active segment", err)
 	}
 	validEnd, err := absorbBlocks(data, knownRecords, maxWriteSeq, true)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return int64(validEnd), nil
+	if validEnd < uint64(len(data)) {
+		return int64(validEnd), 1, nil
+	}
+	return int64(validEnd), 0, nil
 }
 
 func absorbBlocks(data []byte, knownRecords map[uint64]uint32, maxWriteSeq *uint64, stopOnTailCorruption bool) (uint64, error) {
@@ -276,18 +289,39 @@ func absorbDecodedBlock(block []byte, knownRecords map[uint64]uint32, maxWriteSe
 	return false, nil
 }
 
-func truncateIfLarger(path string, size int64) error {
+func truncateIfLarger(path string, size int64) (uint64, error) {
 	stat, err := os.Stat(path)
 	if err != nil {
-		return cache.NewError(cache.ErrIO, "recover", path, "stat segment for truncate", err)
+		return 0, cache.NewError(cache.ErrIO, "recover", path, "stat segment for truncate", err)
 	}
 	if stat.Size() <= size {
-		return nil
+		return 0, nil
 	}
 	if err := os.Truncate(path, size); err != nil {
-		return cache.NewError(cache.ErrIO, "recover", path, "truncate file", err)
+		return 0, cache.NewError(cache.ErrIO, "recover", path, "truncate file", err)
 	}
-	return nil
+	return 1, nil
+}
+
+func RepairSegmentTail(_ string, path string) (int64, error) {
+	if footer, ok := recoverFooterWithTail(path); ok {
+		size := int64(footer.DataEndOffset) + segment.FooterSize
+		if _, err := truncateIfLarger(path, size); err != nil {
+			return 0, err
+		}
+		return size, nil
+	}
+
+	knownRecords := make(map[uint64]uint32)
+	var maxWriteSeq uint64
+	validEnd, _, err := absorbSegmentFile(path, knownRecords, &maxWriteSeq)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := truncateIfLarger(path, validEnd); err != nil {
+		return 0, err
+	}
+	return validEnd, nil
 }
 
 func listSegmentPaths(dir string) ([]string, error) {

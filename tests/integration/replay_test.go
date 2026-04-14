@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"fastReadFile/pkg/cache"
@@ -93,6 +94,31 @@ func TestReplayRespectsMaxBytes(t *testing.T) {
 	}
 	if batch.TotalPayloadBytes != 4 {
 		t.Fatalf("TotalPayloadBytes = %d, want %d", batch.TotalPayloadBytes, 4)
+	}
+}
+
+func TestReplayReturnsCursorCRCAndAckRejectsTamperedCursor(t *testing.T) {
+	engine := mustOpenEngine(t)
+	defer engine.Close()
+
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+
+	batch, err := engine.Replay(context.Background(), "main-server", cache.ReplayLimit{MaxRecords: 10})
+	if err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if batch.NextCursor.CRC32 == 0 {
+		t.Fatalf("NextCursor.CRC32 = 0, want non-zero")
+	}
+
+	tampered := batch.NextCursor
+	tampered.CRC32++
+	if _, err := engine.Ack(context.Background(), "main-server", tampered); !errors.Is(err, cache.ErrCode(cache.ErrCursorInvalid)) {
+		t.Fatalf("Ack(tampered) error = %v, want cursor invalid", err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"fastReadFile/internal/codec"
+	"fastReadFile/internal/segment"
 	"fastReadFile/internal/wal"
 	"fastReadFile/pkg/cache"
 )
@@ -213,10 +214,8 @@ func TestCloseFailsBeforeCheckpointWhenActiveSegmentCannotBeSynced(t *testing.T)
 	if err != nil {
 		t.Fatalf("WriteBatch() error = %v", err)
 	}
-	segmentPath := filepath.Join(root, "segments", "000001.seg")
-	if err := os.Remove(segmentPath); err != nil {
-		t.Fatalf("Remove() error = %v", err)
-	}
+	segment.SetSyncHookForTesting(func(_ *os.File) error { return os.ErrPermission })
+	defer segment.SetSyncHookForTesting(nil)
 
 	if err := engine.Close(); err == nil {
 		t.Fatalf("Close() error = nil, want sync failure")
@@ -426,6 +425,35 @@ func TestUngracefulRecoveryIncrementsHealthCounter(t *testing.T) {
 		t.Fatalf("UngracefulShutdownRecoveriesTotal = %d, want %d", stats.Health.UngracefulShutdownRecoveriesTotal, 1)
 	}
 	_ = engine.Close()
+}
+
+func TestOpenRecordsSegmentTailRepairsFromRecovery(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+
+	firstBlock := mustBuildBlock(t, 1, [][]byte{[]byte("a")}, []int64{100})
+	secondBlock := mustBuildBlock(t, 2, [][]byte{[]byte("b")}, []int64{101})
+	segmentPath := filepath.Join(root, "segments", "000001.seg")
+	if err := os.MkdirAll(filepath.Dir(segmentPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(segmentPath, append(append([]byte{}, firstBlock...), secondBlock[:len(secondBlock)-5]...), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer engine.Close()
+
+	stats, err := engine.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if stats.Health.SegmentTailRepairsTotal == 0 {
+		t.Fatalf("SegmentTailRepairsTotal = 0, want > 0")
+	}
 }
 
 func mustBuildLifecycleBlock(t *testing.T, firstSeq uint64, records []cache.RawRecord) []byte {

@@ -12,10 +12,11 @@ import (
 )
 
 type Manager struct {
-	cfg     cache.Config
-	root    string
-	dir     string
-	current *SegmentFile
+	cfg             cache.Config
+	root            string
+	dir             string
+	current         *SegmentFile
+	tailRepairCount uint64
 }
 
 func OpenManager(root string, cfg cache.Config) (*Manager, error) {
@@ -25,16 +26,17 @@ func OpenManager(root string, cfg cache.Config) (*Manager, error) {
 		return nil, cache.NewError(cache.ErrIO, "open_segment_manager", dir, "create segment directory", err)
 	}
 
-	current, err := openCurrentSegment(root, dir, cfg)
+	current, tailRepairs, err := openCurrentSegment(root, dir, cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Manager{
-		cfg:     cfg,
-		root:    root,
-		dir:     dir,
-		current: current,
+		cfg:             cfg,
+		root:            root,
+		dir:             dir,
+		current:         current,
+		tailRepairCount: tailRepairs,
 	}, nil
 }
 
@@ -71,6 +73,17 @@ func (m *Manager) Close() error {
 	return m.current.Close()
 }
 
+func (m *Manager) SyncActive() error {
+	if m.current == nil {
+		return nil
+	}
+	return m.current.Sync()
+}
+
+func (m *Manager) TailRepairCount() uint64 {
+	return m.tailRepairCount
+}
+
 func (m *Manager) rotate() error {
 	if err := m.current.Close(); err != nil {
 		return err
@@ -90,26 +103,29 @@ type segmentFileInfo struct {
 	sealed bool
 }
 
-func openCurrentSegment(root, dir string, cfg cache.Config) (*SegmentFile, error) {
+func openCurrentSegment(root, dir string, cfg cache.Config) (*SegmentFile, uint64, error) {
 	segments, err := scanSegments(dir)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if len(segments) == 0 {
-		return openSegmentFile(filepath.Join(dir, segmentFileName(1)), 1, cfg)
+		file, err := openSegmentFile(filepath.Join(dir, segmentFileName(1)), 1, cfg)
+		return file, 0, err
 	}
 
 	latest := segments[len(segments)-1]
 	if latest.sealed {
 		nextID := latest.id + 1
-		return openSegmentFile(filepath.Join(dir, segmentFileName(nextID)), nextID, cfg)
+		file, err := openSegmentFile(filepath.Join(dir, segmentFileName(nextID)), nextID, cfg)
+		return file, 0, err
 	}
 
 	recovered, err := rebuildActiveSegmentState(root, latest.path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return openSegmentFileWithState(latest.path, latest.id, cfg, &recovered)
+	file, err := openSegmentFileWithState(latest.path, latest.id, cfg, &recovered)
+	return file, recovered.tailRepairs, err
 }
 
 func scanSegments(dir string) ([]segmentFileInfo, error) {
@@ -162,6 +178,7 @@ func rebuildActiveSegmentState(root, path string) (recoveredSegmentState, error)
 			if err := truncateActiveTail(path, int64(offset)); err != nil {
 				return recoveredSegmentState{}, err
 			}
+			recovered.tailRepairs++
 			return recovered, nil
 		}
 
@@ -171,6 +188,7 @@ func rebuildActiveSegmentState(root, path string) (recoveredSegmentState, error)
 			if err := truncateActiveTail(path, int64(offset)); err != nil {
 				return recoveredSegmentState{}, err
 			}
+			recovered.tailRepairs++
 			return recovered, nil
 		}
 

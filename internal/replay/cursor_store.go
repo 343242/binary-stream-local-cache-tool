@@ -6,6 +6,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"sync"
 
 	cache "fastReadFile/internal/core"
 )
@@ -14,6 +15,7 @@ const cursorSize = 44
 
 type CursorStore struct {
 	root string
+	mu   sync.Mutex
 }
 
 func NewCursorStore(root string) *CursorStore {
@@ -21,6 +23,12 @@ func NewCursorStore(root string) *CursorStore {
 }
 
 func (s *CursorStore) Load(destination string) (cache.ReplayCursor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadLocked(destination)
+}
+
+func (s *CursorStore) loadLocked(destination string) (cache.ReplayCursor, error) {
 	mainPath, backupPath := s.paths(destination)
 	main, mainErr := readCursorFile(mainPath)
 	if mainErr == nil {
@@ -39,12 +47,16 @@ func (s *CursorStore) Load(destination string) (cache.ReplayCursor, error) {
 }
 
 func (s *CursorStore) Save(destination string, cursor cache.ReplayCursor) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	mainPath, backupPath := s.paths(destination)
 	if err := os.MkdirAll(filepath.Dir(mainPath), 0o755); err != nil {
 		return cache.NewError(cache.ErrIO, "save_cursor", filepath.Dir(mainPath), "create cursor directory", err)
 	}
 
-	current, err := s.Load(destination)
+	cursor = FinalizeCursor(cursor)
+	current, err := s.loadLocked(destination)
 	if err != nil && !os.IsNotExist(err) && !isCursorAbsent(current, err) {
 		if !isCursorCorrupted(err) {
 			return err
@@ -95,6 +107,7 @@ func readCursorFile(path string) (cache.ReplayCursor, error) {
 }
 
 func encodeCursor(cursor cache.ReplayCursor) []byte {
+	cursor = FinalizeCursor(cursor)
 	buf := make([]byte, cursorSize)
 	binary.LittleEndian.PutUint32(buf[0:4], cursor.Version)
 	binary.LittleEndian.PutUint64(buf[4:12], cursor.SegmentID)
@@ -144,4 +157,27 @@ func isCursorAbsent(cursor cache.ReplayCursor, err error) bool {
 
 func isCursorCorrupted(err error) bool {
 	return errors.Is(err, cache.ErrCode(cache.ErrCursorCorrupted))
+}
+
+func FinalizeCursor(cursor cache.ReplayCursor) cache.ReplayCursor {
+	cursor.CRC32 = 0
+	buf := make([]byte, 40)
+	binary.LittleEndian.PutUint32(buf[0:4], cursor.Version)
+	binary.LittleEndian.PutUint64(buf[4:12], cursor.SegmentID)
+	binary.LittleEndian.PutUint64(buf[12:20], cursor.BlockOffset)
+	binary.LittleEndian.PutUint32(buf[20:24], cursor.RecordIndex)
+	binary.LittleEndian.PutUint64(buf[24:32], cursor.WriteSeq)
+	binary.LittleEndian.PutUint64(buf[32:40], uint64(cursor.UpdatedAtUnixMs))
+	cursor.CRC32 = crc32.ChecksumIEEE(buf)
+	return cursor
+}
+
+func ValidateCursor(cursor cache.ReplayCursor) error {
+	if cursor == (cache.ReplayCursor{}) {
+		return nil
+	}
+	if FinalizeCursor(cursor).CRC32 != cursor.CRC32 {
+		return cache.NewError(cache.ErrCursorInvalid, "validate_cursor", "", "cursor crc mismatch", nil)
+	}
+	return nil
 }

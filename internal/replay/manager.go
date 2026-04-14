@@ -89,14 +89,14 @@ func (m *Manager) Replay(ctx context.Context, destination string, limit cache.Re
 				batch.RecordCount++
 				batch.TotalPayloadBytes += payloadBytes
 				batch.SegmentID = segmentID
-				batch.NextCursor = cache.ReplayCursor{
+				batch.NextCursor = FinalizeCursor(cache.ReplayCursor{
 					Version:         1,
 					SegmentID:       segmentID,
 					BlockOffset:     uint64(offset),
 					RecordIndex:     uint32(recordIndex),
 					WriteSeq:        record.WriteSeq,
 					UpdatedAtUnixMs: time.Now().UnixMilli(),
-				}
+				})
 			}
 			offset += blockLen
 		}

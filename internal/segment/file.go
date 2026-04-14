@@ -30,6 +30,7 @@ type recoveredSegmentState struct {
 	minEventTime  int64
 	maxEventTime  int64
 	lastBatchSeq  uint64
+	tailRepairs   uint64
 }
 
 type SegmentFile struct {
@@ -47,6 +48,12 @@ type SegmentFile struct {
 	minEventTime   int64
 	maxEventTime   int64
 	lastBatchSeq   uint64
+}
+
+var segmentSyncHook func(*os.File) error
+
+func SetSyncHookForTesting(hook func(*os.File) error) {
+	segmentSyncHook = hook
 }
 
 func openSegmentFile(path string, segmentID uint64, cfg cache.Config) (*SegmentFile, error) {
@@ -108,18 +115,17 @@ func (s *SegmentFile) AppendBlock(block []byte, meta BlockMeta) (AppendResult, e
 		s.firstWriteSeq = meta.FirstWriteSeq
 		s.minEventTime = meta.MinEventTime
 		s.maxEventTime = meta.MaxEventTime
-	}
-	s.lastWriteSeq = meta.LastWriteSeq
-	if meta.MinEventTime < s.minEventTime {
+	} else if meta.MinEventTime < s.minEventTime {
 		s.minEventTime = meta.MinEventTime
 	}
-	if meta.MaxEventTime > s.maxEventTime {
+	if s.firstWriteSeq != 0 && meta.MaxEventTime > s.maxEventTime {
 		s.maxEventTime = meta.MaxEventTime
 	}
+	s.lastWriteSeq = meta.LastWriteSeq
 	s.lastBatchSeq = meta.LastBatchSeq
 
 	if s.shouldSync() {
-		if err := s.file.Sync(); err != nil {
+		if err := syncSegmentFile(s.file); err != nil {
 			return AppendResult{}, cache.NewError(cache.ErrIO, "append_segment", s.path, "fsync segment", err)
 		}
 		s.bytesSinceSync = 0
@@ -150,10 +156,13 @@ func (s *SegmentFile) Seal() (Footer, error) {
 	if err != nil {
 		return Footer{}, err
 	}
+	originalSize := s.size
 	if _, err := s.file.Write(encoded); err != nil {
 		return Footer{}, cache.NewError(cache.ErrIO, "seal_segment", s.path, "write segment footer", err)
 	}
-	if err := s.file.Sync(); err != nil {
+	if err := syncSegmentFile(s.file); err != nil {
+		_ = s.file.Truncate(originalSize)
+		_, _ = s.file.Seek(originalSize, io.SeekStart)
 		return Footer{}, cache.NewError(cache.ErrIO, "seal_segment", s.path, "fsync sealed segment", err)
 	}
 	s.size += int64(len(encoded))
@@ -172,6 +181,18 @@ func (s *SegmentFile) Close() error {
 	return nil
 }
 
+func (s *SegmentFile) Sync() error {
+	if s.file == nil {
+		return nil
+	}
+	if err := syncSegmentFile(s.file); err != nil {
+		return cache.NewError(cache.ErrIO, "sync_segment", s.path, "fsync active segment", err)
+	}
+	s.bytesSinceSync = 0
+	s.lastSyncAt = time.Now()
+	return nil
+}
+
 func (s *SegmentFile) shouldSync() bool {
 	if s.cfg.SegmentFsyncBytes > 0 && s.bytesSinceSync >= s.cfg.SegmentFsyncBytes {
 		return true
@@ -180,4 +201,13 @@ func (s *SegmentFile) shouldSync() bool {
 		return true
 	}
 	return false
+}
+
+func syncSegmentFile(file *os.File) error {
+	if segmentSyncHook != nil {
+		if err := segmentSyncHook(file); err != nil {
+			return err
+		}
+	}
+	return file.Sync()
 }

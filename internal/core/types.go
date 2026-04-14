@@ -76,6 +76,7 @@ type ReplayStats struct {
 type HealthStats struct {
 	GracefulShutdownsTotal            uint64
 	UngracefulShutdownRecoveriesTotal uint64
+	SegmentTailRepairsTotal           uint64
 }
 
 type StatsSnapshot struct {
