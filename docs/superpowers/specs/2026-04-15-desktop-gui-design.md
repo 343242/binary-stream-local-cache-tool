@@ -59,6 +59,7 @@ The following decisions are fixed for phase 1:
 - Real-time terminal emulator
 - Fleet/multi-node management
 - Persistent configuration editing
+- Internationalization beyond English-only UI in phase 1
 
 ## 4. Why Phase 1 Config Is Read-Only
 
@@ -72,6 +73,12 @@ Phase 1 therefore limits the Config page to:
 - showing the default values and allowed ranges
 - showing whether each field is startup-only
 - exporting/copying the effective configuration snapshot for operator reference
+
+Export format:
+
+- JSON
+- UTF-8 encoded
+- contains every `ConfigFieldVM` field rendered by the page
 
 Persistent configuration editing is explicitly deferred until the engine gains a real persisted config contract.
 
@@ -215,6 +222,17 @@ When the app launches in `NoWorkspace`, the main window shows a dedicated landin
 - warning that live writer directories will open in observer mode only or be refused for mutation
 
 No blank screen is permitted.
+
+Recent directory persistence:
+
+- store under the OS user configuration directory
+- Windows:
+  - `%APPDATA%/binary-stream-local-cache-tool/recent-workspaces.json`
+- Linux:
+  - `~/.config/binary-stream-local-cache-tool/recent-workspaces.json`
+- persist across sessions
+- keep at most 5 entries
+- remove entries that no longer exist when the list is next loaded
 
 If the user selects an existing but non-cache directory, the app enters `InvalidWorkspace` and shows:
 
@@ -493,6 +511,12 @@ Card rules:
 - warning cards use severity color plus icon, not color only
 - cards are ordered left-to-right by operational priority
 
+Overview empty-state behavior:
+
+- if the workspace is valid but contains no sealed or active segments yet, render:
+  - title: `No Segment Data Yet`
+  - message: `This workspace is valid, but no segment data has been written yet.`
+
 ### 11.2 Explorer
 
 Required tabs:
@@ -569,6 +593,30 @@ Explorer behavior:
 - on narrow windows the right pane stacks below the list pane
 - tab switches preserve the last selected row per tab when possible
 
+Sorting and filtering:
+
+- phase 1 supports column sorting only on the Segments tab
+- default sort: `segmentID` descending
+- allowed sortable columns:
+  - `segmentID`
+  - `sizeBytes`
+  - `lastWriteSeq`
+  - `recordCount`
+- phase 1 does not support free-text search
+- phase 1 does not support multi-column sort
+- phase 1 does not support server-side filtering
+
+Explorer empty-state behavior:
+
+- Segments tab with zero rows:
+  - `No Segments Found`
+- WAL tab when no WAL file exists:
+  - `No WAL Present`
+- Cursors tab with zero rows:
+  - `No Replay Cursors`
+- Checkpoint tab when checkpoint has not been created:
+  - `No Checkpoint Written Yet`
+
 ### 11.3 Config
 
 Phase-1 config page is read-only.
@@ -607,6 +655,11 @@ Layout specification:
   - allowed range
   - note
 
+Config empty-state behavior:
+
+- if no workspace is open, show:
+  - `Open a workspace to inspect configuration`
+
 ### 11.4 Operations
 
 Required actions:
@@ -635,6 +688,12 @@ Flow requirement:
 - if `verify` reports repairable corruption, the result panel must expose a contextual `Open Repair` action
 - `Open Repair` navigates to `repair-tail` with the affected segment preselected
 - phase 1 does not support one-click auto-repair from a verify result
+
+Operations empty-state behavior:
+
+- if no task has run yet, the task panel shows:
+  - `No Operations Run Yet`
+- if the selected workspace mode blocks the chosen action, the detail panel explains the blocking condition and required lock state
 
 ## 12. ViewModel Contracts
 
@@ -975,6 +1034,15 @@ These ranges become the required validation rules when persisted configuration e
 - dialogs: `14px`
 - inputs/buttons: `10px`
 
+### 16.3.1 Shadows
+
+- card shadow:
+  - `0 1px 2px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.12)`
+- dialog shadow:
+  - `0 10px 30px rgba(16, 24, 40, 0.24), 0 4px 12px rgba(16, 24, 40, 0.16)`
+- dropdown/popover shadow:
+  - `0 6px 16px rgba(16, 24, 40, 0.18), 0 2px 6px rgba(16, 24, 40, 0.12)`
+
 ### 16.4 Light theme
 
 - background: `#F3F5F7`
@@ -1102,22 +1170,22 @@ Required implementation model:
 
 ## 19. Toast and Feedback System
 
-### 18.1 Placement
+### 19.1 Placement
 
 - top-right corner of the content area
 
-### 18.2 Max stack
+### 19.2 Max stack
 
 - maximum 3 simultaneous toasts
 
-### 18.3 Durations
+### 19.3 Durations
 
 - info: `4s`
 - success: `4s`
 - warning: `6s`
 - error: persistent until dismissed
 
-### 18.4 Behavior
+### 19.4 Behavior
 
 - toasts are secondary feedback only
 - long-running task details live in the task panel, not inside the toast
