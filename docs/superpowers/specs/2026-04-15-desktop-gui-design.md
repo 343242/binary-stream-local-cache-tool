@@ -132,6 +132,7 @@ Responsibilities:
 Hard rule:
 
 - this layer must not use `cachectl` stdout as a data source
+- this layer must align every returned field with a real engine/ops/filesystem data source or explicitly return `N/A`
 
 ### 6.3 `desktop/session`
 
@@ -201,6 +202,7 @@ The session enters `InvalidWorkspace` when any of the following is true:
 - required cache subdirectories cannot be recognized
 - critical metadata is unreadable and no safe partial read path exists
 - version/protocol mismatch prevents safe interpretation
+- the selected directory exists but is empty or does not match the cache-root layout
 
 ### 7.3 Empty state
 
@@ -213,6 +215,17 @@ When the app launches in `NoWorkspace`, the main window shows a dedicated landin
 - warning that live writer directories will open in observer mode only or be refused for mutation
 
 No blank screen is permitted.
+
+If the user selects an existing but non-cache directory, the app enters `InvalidWorkspace` and shows:
+
+- title: `Not a Cache Workspace`
+- selected path
+- explanation that the folder does not contain the expected cache layout
+- actions:
+  - `Choose Another Directory`
+  - `Dismiss`
+
+Phase 1 does not offer workspace initialization from the GUI.
 
 ## 8. Multi-Process Safety Model
 
@@ -382,6 +395,16 @@ All pages that render data snapshots must show:
 - `RunCloseCheck`: 30 seconds, cancellable
 - `RunShutdown`: non-cancellable after confirmation
 
+### 9.5 Missing data behavior
+
+If a required page field cannot be derived from existing engine APIs, ops helpers, or direct safe filesystem inspection within the page timeout:
+
+- the field renders as `N/A`
+- the page emits a warning entry describing the unavailable source
+- the missing source becomes an implementation-gap item for the shared service layer
+
+The GUI must not fabricate values.
+
 ## 10. Large Cache Strategy
 
 The GUI must remain usable against large caches, including multi-hundred-GB and multi-TB roots with thousands of segments.
@@ -450,6 +473,26 @@ Allowed derived fields:
 - backlog estimated bytes
 - warning summary
 
+Layout specification:
+
+- top row:
+  - workspace identity card
+  - health/lock card
+  - storage footprint card
+  - replay progress card
+- second row:
+  - throughput/checkpoint/fsync summary card
+  - warnings card
+- third row:
+  - recent segments table, max 8 rows
+  - recent cursors table, max 8 rows
+
+Card rules:
+
+- every summary card shows a primary value, a label, and one secondary line
+- warning cards use severity color plus icon, not color only
+- cards are ordered left-to-right by operational priority
+
 ### 11.2 Explorer
 
 Required tabs:
@@ -508,6 +551,24 @@ Checkpoint detail required fields:
 - version
 - integrity status
 
+Layout specification:
+
+- top bar:
+  - tab selector for `Segments / WAL / Cursors / Checkpoint`
+  - refresh action
+  - stale indicator
+- main split:
+  - left pane: list/table view
+  - right pane: selected detail panel
+- default split ratio:
+  - `45 / 55`
+
+Explorer behavior:
+
+- the right detail pane stays empty with guidance text until a row is selected
+- on narrow windows the right pane stacks below the list pane
+- tab switches preserve the last selected row per tab when possible
+
 ### 11.3 Config
 
 Phase-1 config page is read-only.
@@ -531,6 +592,21 @@ Each field must display:
 - allowed range
 - whether it is startup-only
 
+Layout specification:
+
+- grouped sections:
+  - Segment
+  - Block
+  - Checkpoint
+  - Fsync
+  - Retention
+- each row is a 5-column layout:
+  - field name
+  - effective value
+  - default value
+  - allowed range
+  - note
+
 ### 11.4 Operations
 
 Required actions:
@@ -544,6 +620,21 @@ Optional-if-implemented in phase 1:
 - `shutdown`
 
 All optional actions still require the same safety and confirmation model if they are shipped.
+
+Layout specification:
+
+- left column:
+  - operation catalog cards
+- right column:
+  - selected operation detail
+  - task panel
+  - latest result panel
+
+Flow requirement:
+
+- if `verify` reports repairable corruption, the result panel must expose a contextual `Open Repair` action
+- `Open Repair` navigates to `repair-tail` with the affected segment preselected
+- phase 1 does not support one-click auto-repair from a verify result
 
 ## 12. ViewModel Contracts
 
@@ -586,6 +677,19 @@ The following view models are mandatory in phase 1.
 - `lastRefreshedAt int64`
 - `isStale bool`
 
+Field-source requirements:
+
+- `segmentCount`, `retentionDays`, `nextWriteSeq`, `checkpointsTotal`, `segmentFsyncTotal`, `lastAckedWriteSeq`, `gracefulShutdownsTotal`, `ungracefulRecoveriesTotal`, `segmentTailRepairsTotal`
+  - sourced from `StatsSnapshot` or direct config values
+- `activeSegmentID`
+  - sourced from the latest segment file id or active segment service helper
+- `activeSegmentSizeBytes`
+  - sourced from `os.Stat` on the active segment path
+- `walSizeBytes`
+  - sourced from `os.Stat` on `wal/active.wal`
+- `backlogEstimateRecords` and `backlogEstimateBytes`
+  - optional derived values
+
 ### 12.3 `SegmentListItemVM`
 
 - `segmentID uint64`
@@ -606,9 +710,8 @@ The following view models are mandatory in phase 1.
 - `path string`
 - `sizeBytes int64`
 - `sealed bool`
-- `headerStatus string`
 - `footerStatus string`
-- `repairStatus string`
+- `tailStatus string`
 - `firstWriteSeq uint64`
 - `lastWriteSeq uint64`
 - `recordCount uint64`
@@ -618,6 +721,19 @@ The following view models are mandatory in phase 1.
 - `lastBatchSeq uint64`
 - `rawPreviewHex string`
 - `structuredPreview []KeyValueVM`
+
+Field-source requirements:
+
+- `footerStatus`
+  - sourced from `segment.ReadFooter` success/failure
+- `tailStatus`
+  - sourced from `segment.RecoverFooterWithTail` result or verify/repair findings
+- `blockCount`
+  - derived by scanning valid blocks in the selected segment
+- `structuredPreview`
+  - derived from footer fields and block summary fields
+
+There is no `headerStatus` in phase 1 because the segment file format does not expose a distinct segment-header structure.
 
 ### 12.5 `CursorDetailVM`
 
@@ -718,6 +834,16 @@ The following view models are mandatory in phase 1.
 - `details []KeyValueVM`
 - `changed bool`
 
+### 12.16 `ConfirmDialogVM`
+
+- `title string`
+- `riskLevel string`
+- `summary string`
+- `impactLines []string`
+- `confirmLabel string`
+- `cancelLabel string`
+- `requiresTypedPhrase *string`
+
 ## 13. Error Contract
 
 The backend must return a structured `GUIError`.
@@ -745,6 +871,17 @@ The backend must return a structured `GUIError`.
 - `GUI_ERR_TASK_CANCELLED`
 - `GUI_ERR_OPERATION_BLOCKED`
 - `GUI_ERR_INTERNAL`
+
+### 13.3 Wails binding model
+
+Backend methods exposed to Wails must follow Wails' standard bound-method return model:
+
+- successful query: `(Result, nil)`
+- failed query: `(zero Result, error)`
+
+The desktop app must configure Wails `ErrorFormatter` so that rejected frontend promises receive a JSON-shaped `GUIError`.
+
+The backend must not expose `(Result, *GUIError)` signatures over Wails bindings.
 
 ## 14. Async Task Model
 
@@ -777,6 +914,13 @@ Required event names:
 - `task:progress`
 - `task:finished`
 - `workspace:changed`
+
+### 14.4 Task cleanup
+
+- closing the workspace cancels all cancellable background tasks for that workspace
+- non-cancellable tasks block workspace close until completion or app shutdown handoff
+- app shutdown cancels all cancellable tasks before releasing session resources
+- OS-backed locks are released by process exit; task records are in-memory only in phase 1 and are not recovered after app restart
 
 ## 15. Configuration Reference and Validation Ranges
 
@@ -865,11 +1009,50 @@ These ranges become the required validation rules when persisted configuration e
 - table row height: `40px`
 - primary button height: `36px`
 
+### 16.6.1 Icon system
+
+- icon set: `Lucide`
+- navigation icon size: `18px`
+- inline status icon size: `16px`
+- warning/error icon size: `16px`
+- large empty-state illustration icon size: `48px`
+
 ### 16.7 Theme behavior
 
 - default follows OS theme
 - user can override to light or dark
 - preference is stored locally outside the cache workspace
+
+### 16.8 Motion
+
+- skeleton to content fade: `120ms`
+- toast enter/exit: `160ms`
+- dialog appear/disappear: `140ms`
+- page-switch content transition: `120ms`
+
+Motion must be subtle and may be disabled when reduced-motion preference is detected.
+
+### 16.9 Confirmation dialog layout
+
+All state-changing actions must use a standardized confirmation dialog:
+
+- top:
+  - severity icon
+  - title
+- middle:
+  - one-line summary
+  - impact bullet list
+- bottom:
+  - secondary `Cancel` button on the left
+  - primary action button on the right
+
+Risk styling:
+
+- normal maintenance actions use accent styling
+- destructive/high-risk actions use warning or danger styling
+- `repair-tail` and `shutdown` must show danger styling
+
+For the highest-risk actions, the dialog may require typed confirmation text.
 
 ## 17. Windowing, Layout, and Accessibility
 
@@ -899,7 +1082,25 @@ These ranges become the required validation rules when persisted configuration e
 - dialogs trap focus until closed
 - color is never the sole warning/error signal
 
-## 18. Toast and Feedback System
+## 18. Backend Concurrency Model
+
+Wails may invoke backend methods concurrently, so the session layer must serialize workspace lifecycle changes.
+
+Required rules:
+
+- `OpenWorkspace` and `CloseWorkspace` are mutually exclusive
+- only one workspace may be active at a time
+- page queries operate against an immutable snapshot or a read-locked session state
+- mutating commands require the workspace to still match the active session generation
+- if the workspace is closed while a page query is running, the query returns `GUI_ERR_TASK_CANCELLED` or `GUI_ERR_OPERATION_BLOCKED`
+
+Required implementation model:
+
+- session-level mutex for lifecycle transitions
+- workspace generation counter to invalidate stale async results
+- task registry scoped to the active workspace
+
+## 19. Toast and Feedback System
 
 ### 18.1 Placement
 
@@ -921,34 +1122,47 @@ These ranges become the required validation rules when persisted configuration e
 - toasts are secondary feedback only
 - long-running task details live in the task panel, not inside the toast
 
-## 19. Backend API Surface
+## 20. Backend API Surface
 
-### 19.1 Queries
+### 20.1 Queries
 
-- `OpenWorkspace(rootPath string) (WorkspaceStateVM, *GUIError)`
-- `CloseWorkspace() (*GUIError)`
-- `GetWorkspaceState() (WorkspaceStateVM, *GUIError)`
-- `GetOverview() (OverviewVM, *GUIError)`
-- `ListSegments(page int, pageSize int) (PagedSegmentsVM, *GUIError)`
-- `GetSegmentDetail(segmentID uint64) (SegmentDetailVM, *GUIError)`
-- `GetWALDetail() (WALDetailVM, *GUIError)`
-- `ListCursors() ([]CursorSummaryVM, *GUIError)`
-- `GetCursorDetail(destination string) (CursorDetailVM, *GUIError)`
-- `GetCheckpointDetail() (CheckpointDetailVM, *GUIError)`
-- `GetConfig() (ConfigVM, *GUIError)`
+- `OpenWorkspace(rootPath string) (WorkspaceStateVM, error)`
+- `CloseWorkspace() error`
+- `GetWorkspaceState() (WorkspaceStateVM, error)`
+- `GetOverview() (OverviewVM, error)`
+- `ListSegments(page int, pageSize int) (PagedSegmentsVM, error)`
+- `GetSegmentDetail(segmentID uint64) (SegmentDetailVM, error)`
+- `GetWALDetail() (WALDetailVM, error)`
+- `ListCursors() ([]CursorSummaryVM, error)`
+- `GetCursorDetail(destination string) (CursorDetailVM, error)`
+- `GetCheckpointDetail() (CheckpointDetailVM, error)`
+- `GetConfig() (ConfigVM, error)`
 
-### 19.2 Commands
+### 20.2 Commands
 
-- `Refresh() (*GUIError)`
-- `AcquireMaintenanceLock() (WorkspaceStateVM, *GUIError)`
-- `ReleaseMaintenanceLock() (WorkspaceStateVM, *GUIError)`
-- `RunVerify() (TaskVM, *GUIError)`
-- `RunCloseCheck() (TaskVM, *GUIError)`
-- `RunRepairTail(segmentID uint64) (TaskVM, *GUIError)`
-- `RunShutdown() (TaskVM, *GUIError)`
-- `CancelTask(taskID string) (*GUIError)`
+- `Refresh() error`
+- `AcquireMaintenanceLock() (WorkspaceStateVM, error)`
+- `ReleaseMaintenanceLock() (WorkspaceStateVM, error)`
+- `RunVerify() (TaskVM, error)`
+- `RunCloseCheck() (TaskVM, error)`
+- `RunRepairTail(segmentID uint64) (TaskVM, error)`
+- `RunShutdown() (TaskVM, error)`
+- `CancelTask(taskID string) error`
 
-## 20. Coexistence With CLI Tools
+### 20.3 Cursor discovery
+
+`ListCursors()` must discover destinations by scanning:
+
+- `meta/replay/*.cursor`
+
+Behavior:
+
+- strip `.cursor` suffix to derive `destination`
+- ignore `.bak` files in the primary listing
+- attempt `Load(destination)` for each discovered destination
+- if a cursor file exists but fails to load, include the destination with a corrupted status instead of dropping it silently
+
+## 21. Coexistence With CLI Tools
 
 GUI and CLI tools must share the same lock protocol.
 
@@ -961,9 +1175,40 @@ Rules:
 - `cachectl`, GUI, and the storage engine must use the same shared lock package
 - `cachectl` and GUI must eventually use the same structured service layer for shared maintenance behavior
 
-## 21. Testing Strategy
+## 22. Security Boundary
 
-### 21.1 Go backend tests
+Phase 1 is a local administrative desktop tool.
+
+Explicit non-goals:
+
+- no authentication
+- no authorization
+- no encryption of cache contents
+- no secure multi-user workstation isolation
+
+Security stance:
+
+- it is intended for trusted local operators on the machine that hosts the cache workspace
+- it must not claim protection against a malicious local user with filesystem access
+
+## 23. Runtime Dependencies
+
+Phase-1 runtime requirements are:
+
+- Windows:
+  - WebView2 runtime
+- Linux:
+  - `gcc`
+  - `libgtk3`
+  - `libwebkit`
+
+These requirements follow the official Wails v2 installation guidance.
+
+The project documentation must include a `doctor`-style environment checklist before desktop build instructions.
+
+## 24. Testing Strategy
+
+### 24.1 Go backend tests
 
 - use existing `go test` patterns
 - validate session state transitions
@@ -973,7 +1218,7 @@ Rules:
 - validate timeout/cancel behavior
 - validate error mapping
 
-### 21.2 Frontend tests
+### 24.2 Frontend tests
 
 Use:
 
@@ -989,7 +1234,7 @@ Validate:
 - dialogs
 - task panel updates
 
-### 21.3 Desktop integration tests
+### 24.3 Desktop integration tests
 
 Use Wails integration harness plus temp cache roots to validate:
 
@@ -1001,7 +1246,7 @@ Use Wails integration harness plus temp cache roots to validate:
 - verify task lifecycle
 - operation disablement while writer lock is active
 
-### 21.4 Smoke tests
+### 24.4 Smoke tests
 
 Run on Windows and Linux CI builds:
 
@@ -1011,7 +1256,7 @@ Run on Windows and Linux CI builds:
 - app renders Overview and Explorer
 - app runs `verify`
 
-## 22. Build and Packaging
+## 25. Build and Packaging
 
 Phase-1 deliverables:
 
@@ -1030,13 +1275,14 @@ CI requirements:
 - build Wails desktop artifacts
 - publish artifacts for manual QA
 
-## 23. Acceptance Criteria
+## 26. Acceptance Criteria
 
 Phase 1 is complete only if all of the following are true:
 
 - the application builds on Windows and Linux
 - the app starts into a non-empty landing state
 - the app can open exactly one valid cache root
+- selecting an empty or non-cache directory produces the `InvalidWorkspace` UX defined in section 7.3
 - the app can distinguish `HealthyObserver`, `HealthyMaintenance`, `DegradedReadOnly`, and `InvalidWorkspace`
 - the shared `internal/lock` package is implemented and used by engine, CLI, and desktop backend
 - Overview renders every required field listed in section 11.1
@@ -1046,10 +1292,11 @@ Phase 1 is complete only if all of the following are true:
 - writer-lock conflicts are surfaced explicitly
 - long-running tasks use the task protocol in section 14
 - loading skeletons, progress text, and timeout handling follow section 9
+- Wails bindings use standard `(Result, error)` signatures and frontend errors are shaped through `ErrorFormatter`
 - theme switching works for light and dark themes
 - keyboard shortcuts in section 17.3 work
 
-## 24. Deferred Upgrades
+## 27. Deferred Upgrades
 
 The following items are explicitly deferred, not rejected:
 
@@ -1062,7 +1309,7 @@ The following items are explicitly deferred, not rejected:
 - macOS packaging
 - Web management client using the same backend contracts
 
-## 25. Implementation Notes
+## 28. Implementation Notes
 
 This design deliberately narrows phase 1 in three places:
 
