@@ -43,6 +43,7 @@ The following decisions are fixed for phase 1:
 - Explorer for segment / WAL / cursor / checkpoint
 - Read-only configuration page
 - Guarded operations page
+- Shared cross-process lock foundation used by engine, CLI, and GUI
 - Background loading, progress, cancellation, and timeout handling
 - Multi-process conflict detection and safe-mode gating
 - Structured error reporting
@@ -219,11 +220,40 @@ The current storage engine is not safe for multi-process concurrent writers.
 
 Phase 1 therefore requires a shared lock protocol across the engine, GUI, and CLI tooling.
 
+This lock protocol is a phase-0 prerequisite for GUI implementation, not a GUI-only concern.
+
+### 8.0 Ownership and placement
+
+The lock implementation must live in a shared package:
+
+- `internal/lock/`
+
+It must be consumed by:
+
+- `pkg/cache` for normal writer lifecycle
+- `cachectl` for observer and maintenance operations
+- the desktop backend for observer and maintenance operations
+
+The GUI must not implement an independent lock mechanism.
+
 ### 8.1 Lock file
 
 Use a lock file at:
 
 - `meta/workspace.lock`
+
+The file has two roles:
+
+- lock carrier for the OS-level lock handle
+- human-readable diagnostic metadata such as:
+  - `pid`
+  - `program`
+  - `mode`
+  - `hostname`
+  - `started_at`
+  - `updated_at`
+
+Diagnostic metadata is advisory only. Correctness comes from the OS-level lock, not from parsing file contents.
 
 ### 8.2 Lock modes
 
@@ -234,7 +264,42 @@ Use a lock file at:
 - `MaintenanceExclusive`
   - held by GUI or CLI for guarded mutating operations when no writer is present
 
-### 8.3 Rules
+### 8.3 OS-level implementation
+
+The lock backend must use native OS file locking, not an in-memory mutex and not lock-file-content polling.
+
+Required implementation strategy:
+
+- Linux:
+  - use `flock`
+- Windows:
+  - use `LockFileEx`
+
+The lock must remain valid only while the owning process keeps the file descriptor/handle open.
+
+This matches the intended crash behavior:
+
+- if the owning process exits normally, the lock is released by the OS
+- if the owning process crashes, the lock is released by the OS
+- the lock file itself may remain on disk, but stale file contents must not be treated as an active lock
+
+### 8.4 Platform scope and restrictions
+
+Phase 1 lock semantics are only guaranteed on local filesystems.
+
+Unsupported or degraded targets include:
+
+- NFS
+- SMB/CIFS
+- other network-mounted filesystems with weaker or inconsistent locking semantics
+
+If the workspace root is on a non-local or unverified filesystem, the GUI must:
+
+- surface a warning
+- refuse maintenance mode
+- allow observer mode only if safe reads can still be established
+
+### 8.5 Rules
 
 - `WriterExclusive` blocks `MaintenanceExclusive`
 - `WriterExclusive` may coexist with `ObserverShared` only if the engine explicitly supports observer-safe reads
@@ -242,7 +307,27 @@ Use a lock file at:
 - any mutating GUI action requires `MaintenanceExclusive`
 - if the writer lock is present, `repair-tail`, `shutdown`, and any future write-like action are disabled
 
-### 8.4 Phase-1 safety stance
+Additional rules:
+
+- lock mode upgrade from `ObserverShared` to `MaintenanceExclusive` must not be done in place
+- the caller must release `ObserverShared` first, then acquire `MaintenanceExclusive`
+- if the exclusive acquire fails, the caller returns to observer mode or surfaces the conflict
+- maintenance lock acquisition must fail fast rather than block indefinitely
+- lock acquisition failures must return a structured conflict error, not a generic I/O error
+
+### 8.6 Crash and stale-lock handling
+
+Phase 1 must not implement a separate "stale lock cleanup" command for active lock ownership.
+
+Required behavior:
+
+- stale metadata may be overwritten only after a new OS-level lock has been successfully acquired
+- lock recovery is therefore implicit through OS handle release
+- there is no manual "force unlock" in phase 1
+
+This avoids split-brain behavior caused by deleting a lock file that still has a live owner.
+
+### 8.7 Phase-1 safety stance
 
 Because direct local-directory mode is the initial transport, phase 1 must prefer refusal over unsafe optimism.
 
@@ -873,6 +958,7 @@ Rules:
 - GUI maintenance mode blocks CLI maintenance operations on the same workspace
 - CLI maintenance mode blocks GUI maintenance operations on the same workspace
 - if the storage engine writer lock is active, both GUI and CLI maintenance actions are disabled
+- `cachectl`, GUI, and the storage engine must use the same shared lock package
 - `cachectl` and GUI must eventually use the same structured service layer for shared maintenance behavior
 
 ## 21. Testing Strategy
@@ -882,6 +968,8 @@ Rules:
 - use existing `go test` patterns
 - validate session state transitions
 - validate lock-mode gating
+- validate crash-release semantics through subprocess tests
+- validate local-filesystem-only gating
 - validate timeout/cancel behavior
 - validate error mapping
 
@@ -909,6 +997,7 @@ Use Wails integration harness plus temp cache roots to validate:
 - open invalid workspace
 - observer mode
 - maintenance lock acquisition
+- observer-to-maintenance reacquire flow
 - verify task lifecycle
 - operation disablement while writer lock is active
 
@@ -949,6 +1038,7 @@ Phase 1 is complete only if all of the following are true:
 - the app starts into a non-empty landing state
 - the app can open exactly one valid cache root
 - the app can distinguish `HealthyObserver`, `HealthyMaintenance`, `DegradedReadOnly`, and `InvalidWorkspace`
+- the shared `internal/lock` package is implemented and used by engine, CLI, and desktop backend
 - Overview renders every required field listed in section 11.1
 - Explorer renders every required tab and required field listed in section 11.2
 - Config renders every required field and legal range listed in sections 11.3 and 15
