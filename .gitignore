@@ -9,5 +9,8 @@ dist/
 coverage/
 *.coverprofile
 *.test
-# Added by code-review-graph
-.code-review-graph/
+desktop/frontend/node_modules/
+desktop/frontend/dist/
+desktop/frontend/*.tsbuildinfo
+desktop/frontend/package.json.md5
+desktop/frontend/wailsjs/

@@ -117,6 +117,23 @@ func (l *Log) Scan() ([]Entry, error) {
 		return nil, cache.NewError(cache.ErrIO, "scan_wal", l.path, "restore wal end", err)
 	}
 
+	return scanEntries(data), nil
+}
+
+func ScanReadOnly(root string) ([]Entry, error) {
+	path := filepath.Join(root, "wal", "active.wal")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, cache.NewError(cache.ErrIO, "scan_wal", path, "read wal", err)
+	}
+
+	return scanEntries(data), nil
+}
+
+func scanEntries(data []byte) []Entry {
 	entries := make([]Entry, 0)
 	offset := 0
 	for offset < len(data) {
@@ -146,8 +163,7 @@ func (l *Log) Scan() ([]Entry, error) {
 		})
 		offset += entryLen
 	}
-
-	return entries, nil
+	return entries
 }
 
 func (l *Log) TruncateAfter(offset int64) error {
