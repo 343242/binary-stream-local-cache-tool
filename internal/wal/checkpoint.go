@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	cache "fastReadFile/internal/core"
 )
@@ -21,6 +22,7 @@ type Checkpoint struct {
 
 type CheckpointStore struct {
 	path string
+	mu   sync.Mutex
 }
 
 func NewCheckpointStore(root string) *CheckpointStore {
@@ -30,6 +32,12 @@ func NewCheckpointStore(root string) *CheckpointStore {
 }
 
 func (s *CheckpointStore) Load() (Checkpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadLocked()
+}
+
+func (s *CheckpointStore) loadLocked() (Checkpoint, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -44,17 +52,34 @@ func (s *CheckpointStore) Load() (Checkpoint, error) {
 		return Checkpoint{}, cache.NewError(cache.ErrCorruption, "load_checkpoint", s.path, "checkpoint crc mismatch", nil)
 	}
 
-	return Checkpoint{
+	checkpoint := Checkpoint{
 		Version:          binary.LittleEndian.Uint32(data[0:4]),
 		LastBatchSeq:     binary.LittleEndian.Uint64(data[4:12]),
 		LastWALEndOffset: int64(binary.LittleEndian.Uint64(data[12:20])),
 		UpdatedAtUnixMs:  int64(binary.LittleEndian.Uint64(data[20:28])),
-	}, nil
+	}
+	if checkpoint.Version != 0 && checkpoint.Version != checkpointVersion {
+		return Checkpoint{}, cache.NewError(cache.ErrCorruption, "load_checkpoint", s.path, "unsupported checkpoint version", nil)
+	}
+	return checkpoint, nil
 }
 
 func (s *CheckpointStore) Save(checkpoint Checkpoint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return cache.NewError(cache.ErrIO, "save_checkpoint", filepath.Dir(s.path), "create checkpoint directory", err)
+	}
+	current, err := s.loadLocked()
+	if err != nil {
+		return err
+	}
+	if current.LastBatchSeq > checkpoint.LastBatchSeq {
+		return cache.NewError(cache.ErrValidation, "save_checkpoint", s.path, "checkpoint batch sequence moved backwards", nil)
+	}
+	if current.LastWALEndOffset > checkpoint.LastWALEndOffset {
+		return cache.NewError(cache.ErrValidation, "save_checkpoint", s.path, "checkpoint wal offset moved backwards", nil)
 	}
 
 	checkpoint.Version = checkpointVersion

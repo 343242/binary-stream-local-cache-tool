@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	replaystore "fastReadFile/internal/replay"
 	"fastReadFile/pkg/cache"
 )
 
@@ -192,6 +193,63 @@ func TestConcurrentWriteBatchAndReplay(t *testing.T) {
 	}
 	if batch.RecordCount != 0 {
 		t.Fatalf("final RecordCount = %d, want %d", batch.RecordCount, 0)
+	}
+}
+
+func TestAckRejectsCursorPastNextWriteSeq(t *testing.T) {
+	engine := mustOpenEngine(t)
+	defer engine.Close()
+
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+
+	_, err := engine.Ack(context.Background(), "main-server", replaystore.FinalizeCursor(cache.ReplayCursor{
+		Version:         1,
+		SegmentID:       1,
+		BlockOffset:     0,
+		RecordIndex:     0,
+		WriteSeq:        2,
+		UpdatedAtUnixMs: time.Now().UnixMilli(),
+	}))
+	if !errors.Is(err, cache.ErrCode(cache.ErrCursorInvalid)) {
+		t.Fatalf("Ack() error = %v, want cursor invalid", err)
+	}
+}
+
+func TestReplayPreservesPhysicalOrderAcrossClockRollbackBatches(t *testing.T) {
+	engine := mustOpenEngine(t)
+	defer engine.Close()
+
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 300, Payload: []byte("first-batch")},
+	}); err != nil {
+		t.Fatalf("WriteBatch(first) error = %v", err)
+	}
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 100, Payload: []byte("clock-rollback")},
+		{EventTimeUnixMs: 50, Payload: []byte("rollback-tail")},
+	}); err != nil {
+		t.Fatalf("WriteBatch(second) error = %v", err)
+	}
+
+	batch, err := engine.Replay(context.Background(), "main-server", cache.ReplayLimit{MaxRecords: 10})
+	if err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if batch.RecordCount != 3 {
+		t.Fatalf("RecordCount = %d, want %d", batch.RecordCount, 3)
+	}
+	if !bytes.Equal(batch.Records[0].Payload, []byte("first-batch")) {
+		t.Fatalf("record[0] = %q, want first-batch", batch.Records[0].Payload)
+	}
+	if !bytes.Equal(batch.Records[1].Payload, []byte("clock-rollback")) {
+		t.Fatalf("record[1] = %q, want clock-rollback", batch.Records[1].Payload)
+	}
+	if !bytes.Equal(batch.Records[2].Payload, []byte("rollback-tail")) {
+		t.Fatalf("record[2] = %q, want rollback-tail", batch.Records[2].Payload)
 	}
 }
 

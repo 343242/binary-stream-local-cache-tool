@@ -2,6 +2,7 @@ package unit
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"fastReadFile/pkg/cache"
@@ -30,5 +31,19 @@ func TestDefaultConfigIsStable(t *testing.T) {
 	}
 	if cfg.CheckpointBytes != 64<<20 {
 		t.Fatalf("CheckpointBytes = %d, want %d", cfg.CheckpointBytes, 64<<20)
+	}
+}
+
+func TestWriteBatchRejectsEmptySlice(t *testing.T) {
+	cfg := cache.Config{RootDir: t.TempDir()}
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer engine.Close()
+
+	_, err = engine.WriteBatch(context.Background(), nil)
+	if !errors.Is(err, cache.ErrCode(cache.ErrValidation)) {
+		t.Fatalf("WriteBatch(nil) error = %v, want validation", err)
 	}
 }

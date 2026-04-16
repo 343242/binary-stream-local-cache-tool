@@ -1,9 +1,11 @@
 package integration
 
 import (
+	"encoding/binary"
 	"bytes"
 	"context"
 	"errors"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"testing"
@@ -344,6 +346,64 @@ func TestRecoveryRejectsSequenceConflict(t *testing.T) {
 	_, err := recovery.Recover(context.Background(), root, cfg)
 	if !errors.Is(err, cache.ErrCode(cache.ErrSequenceConflict)) {
 		t.Fatalf("Recover() error = %v, want sequence conflict", err)
+	}
+}
+
+func TestRecoveryKeepsWALWhenActiveSegmentSyncFails(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+
+	block := mustBuildBlock(t, 1, [][]byte{[]byte("a")}, []int64{100})
+	log := mustOpenWAL(t, root)
+	meta, err := log.Append(1, block)
+	if err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	recovery.SetActiveSegmentSyncHookForTesting(func(_ *os.File) error { return os.ErrPermission })
+	defer recovery.SetActiveSegmentSyncHookForTesting(nil)
+
+	if _, err := recovery.Recover(context.Background(), root, cfg); err == nil {
+		t.Fatalf("Recover() error = nil, want sync failure")
+	}
+
+	log = mustOpenWAL(t, root)
+	defer log.Close()
+	entries, err := log.Scan()
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want %d", len(entries), 1)
+	}
+	if entries[0].EndOffset != meta.EndOffset {
+		t.Fatalf("EndOffset = %d, want %d", entries[0].EndOffset, meta.EndOffset)
+	}
+}
+
+func TestRecoveryRejectsRebuiltSegmentWithInvertedWriteSeqBounds(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+
+	block := mustBuildBlock(t, 5, [][]byte{[]byte("a")}, []int64{100})
+	binary.LittleEndian.PutUint64(block[12:20], 9)
+	binary.LittleEndian.PutUint64(block[20:28], 8)
+	binary.LittleEndian.PutUint32(block[44:48], crc32.ChecksumIEEE(append(append([]byte{}, block[:44]...), block[48:]...)))
+
+	path := filepath.Join(root, "segments", "000001.seg")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, block, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := segment.OpenManager(root, cfg)
+	if !errors.Is(err, cache.ErrCode(cache.ErrCorruption)) {
+		t.Fatalf("OpenManager() error = %v, want corruption", err)
 	}
 }
 

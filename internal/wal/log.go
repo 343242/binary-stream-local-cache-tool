@@ -43,6 +43,9 @@ func Open(root string) (*Log, error) {
 	if err := os.MkdirAll(walDir, 0o755); err != nil {
 		return nil, cache.NewError(cache.ErrIO, "open_wal", walDir, "create wal directory", err)
 	}
+	if err := syncWalDir(walDir); err != nil {
+		return nil, err
+	}
 
 	path := filepath.Join(walDir, "active.wal")
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
@@ -154,6 +157,9 @@ func (l *Log) TruncateAfter(offset int64) error {
 	if err := l.file.Truncate(offset); err != nil {
 		return cache.NewError(cache.ErrIO, "truncate_wal", l.path, "truncate wal", err)
 	}
+	if err := l.file.Sync(); err != nil {
+		return cache.NewError(cache.ErrIO, "truncate_wal", l.path, "fsync truncated wal", err)
+	}
 	if _, err := l.file.Seek(offset, io.SeekStart); err != nil {
 		return cache.NewError(cache.ErrIO, "truncate_wal", l.path, "seek wal offset", err)
 	}
@@ -188,6 +194,19 @@ func (l *Log) Close() error {
 	l.file = nil
 	if err != nil {
 		return cache.NewError(cache.ErrIO, "close_wal", l.path, "close wal file", err)
+	}
+	return nil
+}
+
+func syncWalDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return cache.NewError(cache.ErrIO, "sync_wal_dir", path, "open wal directory", err)
+	}
+	defer dir.Close()
+
+	if err := dir.Sync(); err != nil {
+		return cache.NewError(cache.ErrIO, "sync_wal_dir", path, "fsync wal directory", err)
 	}
 	return nil
 }

@@ -117,27 +117,10 @@ func loadReplayableSegmentData(path string) ([]byte, error) {
 	if footer, err := segment.ReadFooter(path); err == nil {
 		return data[:footer.DataEndOffset], nil
 	}
-	if footer, ok := recoverFooterWithTail(path, data); ok {
+	if footer, ok := segment.RecoverFooterWithTail(path, data); ok {
 		return data[:footer.DataEndOffset], nil
 	}
 	return data, nil
-}
-
-func recoverFooterWithTail(path string, data []byte) (segment.Footer, bool) {
-	if len(data) < segment.FooterSize {
-		return segment.Footer{}, false
-	}
-	for start := len(data) - segment.FooterSize; start >= 0; start-- {
-		footer, err := segment.DecodeFooter(data[start : start+segment.FooterSize])
-		if err != nil {
-			continue
-		}
-		if err := segment.ValidateFooter(path, int64(start+segment.FooterSize), footer); err != nil {
-			continue
-		}
-		return footer, true
-	}
-	return segment.Footer{}, false
 }
 
 func listSegmentPaths(dir string) ([]string, error) {

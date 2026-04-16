@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -74,4 +75,57 @@ func TestConcurrentEngineAccessIsSerialized(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestConcurrentCloseOnlyOneCallerOwnsShutdown(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	engine, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() {
+		closeStepHook = nil
+		_ = engine.Close()
+	}()
+
+	if _, err := engine.WriteBatch(context.Background(), []RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+
+	block := make(chan struct{})
+	closeStepHook = func(step string) {
+		if step == "after_checkpoint" {
+			<-block
+		}
+	}
+
+	errCh := make(chan error, 2)
+	go func() { errCh <- engine.Close() }()
+	go func() { errCh <- engine.Close() }()
+
+	time.Sleep(20 * time.Millisecond)
+	close(block)
+
+	first := <-errCh
+	second := <-errCh
+	successes := 0
+	inProgress := 0
+	for _, err := range []error{first, second} {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrCode(ErrShutdownInProgress)):
+			inProgress++
+		default:
+			t.Fatalf("Close() error = %v, want nil or shutdown in progress", err)
+		}
+	}
+	if successes == 0 {
+		t.Fatalf("successes = %d, want at least one successful close", successes)
+	}
+	if successes+inProgress != 2 {
+		t.Fatalf("successes = %d, inProgress = %d, want only nil or shutdown in progress results", successes, inProgress)
+	}
 }

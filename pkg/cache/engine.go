@@ -86,6 +86,7 @@ func Open(cfg Config) (*StorageEngine, error) {
 	}
 	collector.RecordSegmentTailRepair(state.SegmentTailRepairsTotal)
 	collector.RecordSegmentTailRepair(segments.TailRepairCount())
+	collector.RecordSegmentFsyncCount(segments.DrainSyncCount())
 	if len(entries) > 0 {
 		engine.batchSeq = entries[len(entries)-1].BatchSeq
 		engine.latestWALEndOffset = entries[len(entries)-1].EndOffset
@@ -151,6 +152,9 @@ func (s *StorageEngine) WriteBatch(_ context.Context, records []RawRecord) (Writ
 		result.WALBytesWritten += uint64(walMeta.BytesWritten)
 		result.SegmentBytesWritten += appendResult.BytesWritten
 		s.latestWALEndOffset = walMeta.EndOffset
+		if appendResult.Synced {
+			s.stats.RecordSegmentFsync()
+		}
 		if currentSegmentID != 0 && appendResult.SegmentID != currentSegmentID {
 			rotationTriggered = true
 		}
@@ -189,6 +193,9 @@ func (s *StorageEngine) Ack(_ context.Context, destination string, cursor Replay
 	if err := replaystore.ValidateCursor(cursor); err != nil {
 		return AckResult{}, err
 	}
+	if cursor.WriteSeq >= s.nextWriteSeq {
+		return AckResult{}, NewError(ErrCursorInvalid, "ack", s.cfg.RootDir, "cursor write sequence exceeds persisted records", nil)
+	}
 	previous, err := s.cursorStore.Load(destination)
 	if err != nil {
 		return AckResult{}, err
@@ -223,12 +230,17 @@ func (s *StorageEngine) Recover(ctx context.Context) error {
 
 func (s *StorageEngine) Stats(_ context.Context) (StatsSnapshot, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	if err := s.checkReadableStateLocked("stats"); err != nil {
+		s.mu.RUnlock()
+		return StatsSnapshot{}, err
+	}
 	snapshot := s.stats.Snapshot()
+	rootDir := s.cfg.RootDir
 	snapshot.Capacity.RetentionDays = s.cfg.RetentionDays
 	snapshot.Capacity.NextWriteSeq = s.nextWriteSeq
-	snapshot.Capacity.SegmentCount = countSegments(filepath.Join(s.cfg.RootDir, "segments"))
+	s.mu.RUnlock()
+
+	snapshot.Capacity.SegmentCount = countSegments(filepath.Join(rootDir, "segments"))
 	return snapshot, nil
 }
 
@@ -468,8 +480,15 @@ func (s *StorageEngine) syncActiveSegmentLocked() error {
 	if err := s.segments.SyncActive(); err != nil {
 		return err
 	}
-	s.stats.RecordSegmentFsync()
+	s.stats.RecordSegmentFsyncCount(maxUint64(1, s.segments.DrainSyncCount()))
 	return nil
+}
+
+func maxUint64(left, right uint64) uint64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func (s *StorageEngine) checkWritableStateLocked(op string) error {

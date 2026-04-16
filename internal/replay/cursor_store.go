@@ -12,6 +12,7 @@ import (
 )
 
 const cursorSize = 44
+const cursorVersion uint32 = 1
 
 type CursorStore struct {
 	root string
@@ -55,7 +56,13 @@ func (s *CursorStore) Save(destination string, cursor cache.ReplayCursor) error 
 		return cache.NewError(cache.ErrIO, "save_cursor", filepath.Dir(mainPath), "create cursor directory", err)
 	}
 
+	if cursor != (cache.ReplayCursor{}) && cursor.Version == 0 {
+		cursor.Version = cursorVersion
+	}
 	cursor = FinalizeCursor(cursor)
+	if err := ValidateCursor(cursor); err != nil {
+		return err
+	}
 	current, err := s.loadLocked(destination)
 	if err != nil && !os.IsNotExist(err) && !isCursorAbsent(current, err) {
 		if !isCursorCorrupted(err) {
@@ -95,7 +102,7 @@ func readCursorFile(path string) (cache.ReplayCursor, error) {
 	if binary.LittleEndian.Uint32(data[40:44]) != crc32.ChecksumIEEE(data[:40]) {
 		return cache.ReplayCursor{}, cache.NewError(cache.ErrCursorCorrupted, "read_cursor", path, "cursor crc mismatch", nil)
 	}
-	return cache.ReplayCursor{
+	cursor := cache.ReplayCursor{
 		Version:         binary.LittleEndian.Uint32(data[0:4]),
 		SegmentID:       binary.LittleEndian.Uint64(data[4:12]),
 		BlockOffset:     binary.LittleEndian.Uint64(data[12:20]),
@@ -103,7 +110,11 @@ func readCursorFile(path string) (cache.ReplayCursor, error) {
 		WriteSeq:        binary.LittleEndian.Uint64(data[24:32]),
 		UpdatedAtUnixMs: int64(binary.LittleEndian.Uint64(data[32:40])),
 		CRC32:           binary.LittleEndian.Uint32(data[40:44]),
-	}, nil
+	}
+	if err := ValidateCursor(cursor); err != nil {
+		return cache.ReplayCursor{}, cache.NewError(cache.ErrCursorCorrupted, "read_cursor", path, "cursor validation failed", err)
+	}
+	return cursor, nil
 }
 
 func encodeCursor(cursor cache.ReplayCursor) []byte {
@@ -175,6 +186,9 @@ func FinalizeCursor(cursor cache.ReplayCursor) cache.ReplayCursor {
 func ValidateCursor(cursor cache.ReplayCursor) error {
 	if cursor == (cache.ReplayCursor{}) {
 		return nil
+	}
+	if cursor.Version != cursorVersion {
+		return cache.NewError(cache.ErrCursorInvalid, "validate_cursor", "", "unsupported cursor version", nil)
 	}
 	if FinalizeCursor(cursor).CRC32 != cursor.CRC32 {
 		return cache.NewError(cache.ErrCursorInvalid, "validate_cursor", "", "cursor crc mismatch", nil)

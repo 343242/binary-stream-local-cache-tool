@@ -43,9 +43,16 @@ func (c *Collector) RecordCheckpoint() {
 }
 
 func (c *Collector) RecordSegmentFsync() {
+	c.RecordSegmentFsyncCount(1)
+}
+
+func (c *Collector) RecordSegmentFsyncCount(count uint64) {
+	if count == 0 {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.snapshot.IO.SegmentFsyncTotal++
+	c.snapshot.IO.SegmentFsyncTotal += count
 }
 
 func (c *Collector) RecordUngracefulRecovery() {

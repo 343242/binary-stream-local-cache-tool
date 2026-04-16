@@ -21,6 +21,7 @@ type AppendResult struct {
 	SegmentID    uint64
 	BlockOffset  uint64
 	BytesWritten uint64
+	Synced       bool
 }
 
 type recoveredSegmentState struct {
@@ -124,18 +125,21 @@ func (s *SegmentFile) AppendBlock(block []byte, meta BlockMeta) (AppendResult, e
 	s.lastWriteSeq = meta.LastWriteSeq
 	s.lastBatchSeq = meta.LastBatchSeq
 
+	synced := false
 	if s.shouldSync() {
 		if err := syncSegmentFile(s.file); err != nil {
 			return AppendResult{}, cache.NewError(cache.ErrIO, "append_segment", s.path, "fsync segment", err)
 		}
 		s.bytesSinceSync = 0
 		s.lastSyncAt = time.Now()
+		synced = true
 	}
 
 	return AppendResult{
 		SegmentID:    s.id,
 		BlockOffset:  uint64(offset),
 		BytesWritten: uint64(written),
+		Synced:       synced,
 	}, nil
 }
 

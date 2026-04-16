@@ -98,6 +98,26 @@ func TestCachectlRepairTailMatchesRecoveryBoundaryForPartialActiveSegment(t *tes
 	}
 }
 
+func TestCachectlRepairTailReturnsNoopForCleanSegment(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	assertCommandContains(t, root, []string{"repair-tail", "--segment", "1"}, "noop")
+}
+
 func assertCommandContains(t *testing.T, root string, args []string, want string) {
 	t.Helper()
 

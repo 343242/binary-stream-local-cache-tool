@@ -128,8 +128,8 @@ func BlockLength(buf []byte) (int, error) {
 }
 
 func blockChecksum(buf []byte) uint32 {
-	hashInput := make([]byte, 0, len(buf)-16)
-	hashInput = append(hashInput, buf[12:44]...)
+	hashInput := make([]byte, 0, len(buf)-4)
+	hashInput = append(hashInput, buf[:44]...)
 	hashInput = append(hashInput, buf[48:]...)
 	return crc32.ChecksumIEEE(hashInput)
 }

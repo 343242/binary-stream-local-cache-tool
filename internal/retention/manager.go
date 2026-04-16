@@ -92,6 +92,10 @@ func (m *Manager) Cleanup(destination string) (Result, error) {
 		if candidate.ageDays <= effectiveDays {
 			continue
 		}
+		cursor, err = m.store.Load(destination)
+		if err != nil {
+			return Result{}, err
+		}
 		if candidate.footer.LastWriteSeq > cursor.WriteSeq {
 			continue
 		}

@@ -91,10 +91,14 @@ func Verify(root string) (string, error) {
 
 func RepairTail(root string, segmentID uint64) (string, error) {
 	path := filepath.Join(root, "segments", formatSegmentID(segmentID)+".seg")
-	if _, err := recovery.RepairSegmentTail(root, path); err != nil {
+	result, err := recovery.RepairSegmentTail(root, path)
+	if err != nil {
 		return "", err
 	}
-	return "repaired", nil
+	if result.Repaired {
+		return "repaired", nil
+	}
+	return "noop", nil
 }
 
 func InspectSegment(root string, segmentID uint64) (string, error) {
@@ -117,7 +121,7 @@ func loadSegmentData(path string) ([]byte, error) {
 	if footer, err := segment.ReadFooter(path); err == nil {
 		return data[:footer.DataEndOffset], nil
 	}
-	if footer, ok := recoverFooterWithTail(path, data); ok {
+	if footer, ok := segment.RecoverFooterWithTail(path, data); ok {
 		return data[:footer.DataEndOffset], nil
 	}
 	offset := 0
@@ -129,23 +133,6 @@ func loadSegmentData(path string) ([]byte, error) {
 		offset += blockLen
 	}
 	return data[:offset], nil
-}
-
-func recoverFooterWithTail(path string, data []byte) (segment.Footer, bool) {
-	if len(data) < segment.FooterSize {
-		return segment.Footer{}, false
-	}
-	for start := len(data) - segment.FooterSize; start >= 0; start-- {
-		footer, err := segment.DecodeFooter(data[start : start+segment.FooterSize])
-		if err != nil {
-			continue
-		}
-		if err := segment.ValidateFooter(path, int64(start+segment.FooterSize), footer); err != nil {
-			continue
-		}
-		return footer, true
-	}
-	return segment.Footer{}, false
 }
 
 func formatSegmentID(id uint64) string {

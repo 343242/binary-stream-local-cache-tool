@@ -135,3 +135,42 @@ func TestCursorLoadRejectsCRCMismatchWithoutBackup(t *testing.T) {
 		t.Fatalf("Load() error = %v, want cursor corrupted", err)
 	}
 }
+
+func TestCursorLoadRejectsUnsupportedVersionWithoutBackup(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := replay.NewCursorStore(root)
+	cursor := cache.ReplayCursor{
+		Version:         1,
+		SegmentID:       5,
+		BlockOffset:     48,
+		RecordIndex:     4,
+		WriteSeq:        44,
+		UpdatedAtUnixMs: 111,
+	}
+	if err := store.Save("main-server", cursor); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	mainPath := filepath.Join(root, "meta", "replay", "main-server.cursor")
+	backupPath := mainPath + ".bak"
+	if err := os.Remove(backupPath); err != nil {
+		t.Fatalf("Remove(backup) error = %v", err)
+	}
+	file, err := os.OpenFile(mainPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile() error = %v", err)
+	}
+	if _, err := file.WriteAt([]byte{0x02}, 0); err != nil {
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	_, err = store.Load("main-server")
+	if !errors.Is(err, cache.ErrCode(cache.ErrCursorCorrupted)) {
+		t.Fatalf("Load() error = %v, want cursor corrupted", err)
+	}
+}

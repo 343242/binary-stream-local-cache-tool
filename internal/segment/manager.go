@@ -1,10 +1,12 @@
 package segment
 
 import (
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"fastReadFile/internal/codec"
 	cache "fastReadFile/internal/core"
@@ -17,6 +19,7 @@ type Manager struct {
 	dir             string
 	current         *SegmentFile
 	tailRepairCount uint64
+	syncCount       uint64
 }
 
 func OpenManager(root string, cfg cache.Config) (*Manager, error) {
@@ -56,14 +59,25 @@ func (m *Manager) AppendBlock(block []byte, meta BlockMeta) (AppendResult, error
 			return AppendResult{}, err
 		}
 	}
-	return m.current.AppendBlock(block, meta)
+	result, err := m.current.AppendBlock(block, meta)
+	if err != nil {
+		return AppendResult{}, err
+	}
+	if result.Synced {
+		atomic.AddUint64(&m.syncCount, 1)
+	}
+	return result, nil
 }
 
 func (m *Manager) SealActive() (Footer, error) {
 	if m.current == nil {
 		return Footer{}, cache.NewError(cache.ErrIO, "seal_segment_manager", m.dir, "no active segment", nil)
 	}
-	return m.current.Seal()
+	footer, err := m.current.Seal()
+	if err == nil {
+		atomic.AddUint64(&m.syncCount, 1)
+	}
+	return footer, err
 }
 
 func (m *Manager) Close() error {
@@ -77,11 +91,19 @@ func (m *Manager) SyncActive() error {
 	if m.current == nil {
 		return nil
 	}
-	return m.current.Sync()
+	if err := m.current.Sync(); err != nil {
+		return err
+	}
+	atomic.AddUint64(&m.syncCount, 1)
+	return nil
 }
 
 func (m *Manager) TailRepairCount() uint64 {
 	return m.tailRepairCount
+}
+
+func (m *Manager) DrainSyncCount() uint64 {
+	return atomic.SwapUint64(&m.syncCount, 0)
 }
 
 func (m *Manager) rotate() error {
@@ -122,6 +144,9 @@ func openCurrentSegment(root, dir string, cfg cache.Config) (*SegmentFile, uint6
 
 	recovered, err := rebuildActiveSegmentState(root, latest.path)
 	if err != nil {
+		return nil, 0, err
+	}
+	if err := validateRecoveredState(latest.path, recovered); err != nil {
 		return nil, 0, err
 	}
 	file, err := openSegmentFileWithState(latest.path, latest.id, cfg, &recovered)
@@ -205,7 +230,7 @@ func rebuildActiveSegmentState(root, path string) (recoveredSegmentState, error)
 		if block.MaxEventTime > recovered.maxEventTime {
 			recovered.maxEventTime = block.MaxEventTime
 		}
-		if batchSeq, ok := walBatchSeq[string(blockBytes)]; ok {
+		if batchSeq, ok := walBatchSeq[blockFingerprint(blockBytes)]; ok {
 			recovered.lastBatchSeq = batchSeq
 		}
 
@@ -214,7 +239,14 @@ func rebuildActiveSegmentState(root, path string) (recoveredSegmentState, error)
 	return recovered, nil
 }
 
-func walBatchSeqByBlock(root string) (map[string]uint64, error) {
+type blockKey struct {
+	crc32         uint32
+	length        int
+	firstWriteSeq uint64
+	lastWriteSeq  uint64
+}
+
+func walBatchSeqByBlock(root string) (map[blockKey]uint64, error) {
 	log, err := wal.Open(root)
 	if err != nil {
 		return nil, err
@@ -226,11 +258,27 @@ func walBatchSeqByBlock(root string) (map[string]uint64, error) {
 		return nil, err
 	}
 
-	byBlock := make(map[string]uint64, len(entries))
+	byBlock := make(map[blockKey]uint64, len(entries))
 	for _, entry := range entries {
-		byBlock[string(entry.Block)] = entry.BatchSeq
+		byBlock[blockFingerprint(entry.Block)] = entry.BatchSeq
 	}
 	return byBlock, nil
+}
+
+func validateRecoveredState(path string, recovered recoveredSegmentState) error {
+	if recovered.recordCount == 0 {
+		if recovered.firstWriteSeq != 0 || recovered.lastWriteSeq != 0 {
+			return cache.NewError(cache.ErrCorruption, "rebuild_active_segment", path, "empty recovered segment has write sequence bounds", nil)
+		}
+		return nil
+	}
+	if recovered.firstWriteSeq == 0 {
+		return cache.NewError(cache.ErrCorruption, "rebuild_active_segment", path, "recovered segment missing first write sequence", nil)
+	}
+	if recovered.firstWriteSeq > recovered.lastWriteSeq {
+		return cache.NewError(cache.ErrCorruption, "rebuild_active_segment", path, "recovered segment write sequence bounds are inverted", nil)
+	}
+	return nil
 }
 
 func truncateActiveTail(path string, size int64) error {
@@ -238,6 +286,22 @@ func truncateActiveTail(path string, size int64) error {
 		return cache.NewError(cache.ErrIO, "rebuild_active_segment", path, "truncate corrupt active tail", err)
 	}
 	return nil
+}
+
+func blockFingerprint(block []byte) blockKey {
+	decoded, err := codec.ParseBlock(block)
+	// Corrupt blocks get a degraded fingerprint (crc32+length only).
+	// This is safe: a corrupt segment block won't match any WAL entry
+	// since WAL entries are always well-formed.
+	if err != nil {
+		return blockKey{crc32: crc32.ChecksumIEEE(block), length: len(block)}
+	}
+	return blockKey{
+		crc32:         crc32.ChecksumIEEE(block),
+		length:        len(block),
+		firstWriteSeq: decoded.FirstWriteSeq,
+		lastWriteSeq:  decoded.LastWriteSeq,
+	}
 }
 
 func segmentFileName(id uint64) string {

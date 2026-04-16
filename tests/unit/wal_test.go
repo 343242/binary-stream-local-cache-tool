@@ -127,3 +127,25 @@ func TestWALCheckpointRoundTrip(t *testing.T) {
 		t.Fatalf("LastWALEndOffset = %d, want %d", got.LastWALEndOffset, want.LastWALEndOffset)
 	}
 }
+
+func TestWALCheckpointRejectsBackwardSave(t *testing.T) {
+	t.Parallel()
+
+	store := wal.NewCheckpointStore(t.TempDir())
+	if err := store.Save(wal.Checkpoint{
+		LastBatchSeq:     9,
+		LastWALEndOffset: 1024,
+		UpdatedAtUnixMs:  77,
+	}); err != nil {
+		t.Fatalf("Save(initial) error = %v", err)
+	}
+
+	err := store.Save(wal.Checkpoint{
+		LastBatchSeq:     8,
+		LastWALEndOffset: 1000,
+		UpdatedAtUnixMs:  78,
+	})
+	if err == nil {
+		t.Fatalf("Save(backward) error = nil, want validation failure")
+	}
+}

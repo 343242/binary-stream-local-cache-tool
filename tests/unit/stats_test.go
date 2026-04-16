@@ -35,3 +35,29 @@ func TestStatsReflectWritesAndReplays(t *testing.T) {
 		t.Fatalf("ReplayBatchesTotal = %d, want %d", stats.IO.ReplayBatchesTotal, 1)
 	}
 }
+
+func TestStatsReflectSegmentFsyncs(t *testing.T) {
+	cfg := cache.DefaultConfig(t.TempDir())
+	cfg.SegmentFsyncBytes = 1
+	cfg.CheckpointBytes = 1 << 30
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer engine.Close()
+
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+
+	stats, err := engine.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if stats.IO.SegmentFsyncTotal == 0 {
+		t.Fatalf("SegmentFsyncTotal = 0, want > 0")
+	}
+}
