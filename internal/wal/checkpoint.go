@@ -68,17 +68,29 @@ func (s *CheckpointStore) Save(checkpoint Checkpoint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.saveLocked(checkpoint, false)
+}
+
+func (s *CheckpointStore) SaveReconciled(checkpoint Checkpoint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.saveLocked(checkpoint, true)
+}
+
+func (s *CheckpointStore) saveLocked(checkpoint Checkpoint, allowBackward bool) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return cache.NewError(cache.ErrIO, "save_checkpoint", filepath.Dir(s.path), "create checkpoint directory", err)
 	}
+
 	current, err := s.loadLocked()
 	if err != nil {
 		return err
 	}
-	if current.LastBatchSeq > checkpoint.LastBatchSeq {
+	if !allowBackward && current.LastBatchSeq > checkpoint.LastBatchSeq {
 		return cache.NewError(cache.ErrValidation, "save_checkpoint", s.path, "checkpoint batch sequence moved backwards", nil)
 	}
-	if current.LastWALEndOffset > checkpoint.LastWALEndOffset {
+	if !allowBackward && current.LastWALEndOffset > checkpoint.LastWALEndOffset {
 		return cache.NewError(cache.ErrValidation, "save_checkpoint", s.path, "checkpoint wal offset moved backwards", nil)
 	}
 

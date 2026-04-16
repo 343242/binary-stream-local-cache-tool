@@ -149,3 +149,35 @@ func TestWALCheckpointRejectsBackwardSave(t *testing.T) {
 		t.Fatalf("Save(backward) error = nil, want validation failure")
 	}
 }
+
+func TestWALCheckpointReconcileAllowsBackwardRepair(t *testing.T) {
+	t.Parallel()
+
+	store := wal.NewCheckpointStore(t.TempDir())
+	if err := store.Save(wal.Checkpoint{
+		LastBatchSeq:     9,
+		LastWALEndOffset: 1024,
+		UpdatedAtUnixMs:  77,
+	}); err != nil {
+		t.Fatalf("Save(initial) error = %v", err)
+	}
+
+	if err := store.SaveReconciled(wal.Checkpoint{
+		LastBatchSeq:     7,
+		LastWALEndOffset: 512,
+		UpdatedAtUnixMs:  78,
+	}); err != nil {
+		t.Fatalf("SaveReconciled() error = %v", err)
+	}
+
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.LastBatchSeq != 7 {
+		t.Fatalf("LastBatchSeq = %d, want %d", got.LastBatchSeq, 7)
+	}
+	if got.LastWALEndOffset != 512 {
+		t.Fatalf("LastWALEndOffset = %d, want %d", got.LastWALEndOffset, 512)
+	}
+}

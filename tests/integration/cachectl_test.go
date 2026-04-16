@@ -118,6 +118,36 @@ func TestCachectlRepairTailReturnsNoopForCleanSegment(t *testing.T) {
 	assertCommandContains(t, root, []string{"repair-tail", "--segment", "1"}, "noop")
 }
 
+func TestCachectlVerifyRejectsCorruptedActiveSegment(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	path := filepath.Join(root, "segments", "000001.seg")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	data[44] ^= 0xFF
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	assertCommandFailsContains(t, root, []string{"verify"}, "block crc mismatch")
+}
+
 func assertCommandContains(t *testing.T, root string, args []string, want string) {
 	t.Helper()
 
@@ -130,6 +160,21 @@ func assertCommandContains(t *testing.T, root string, args []string, want string
 	}
 	if !bytes.Contains(output, []byte(want)) {
 		t.Fatalf("output %q does not contain %q", output, want)
+	}
+}
+
+func assertCommandFailsContains(t *testing.T, root string, args []string, want string) {
+	t.Helper()
+
+	cmdArgs := append([]string{"run", "./cmd/cachectl", "--root", root}, args...)
+	cmd := exec.Command("go", cmdArgs...)
+	cmd.Dir = projectRoot(t)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("go %v unexpectedly succeeded:\n%s", cmdArgs, output)
+	}
+	if !bytes.Contains(output, []byte(want)) {
+		t.Fatalf("failure output %q does not contain %q", output, want)
 	}
 }
 

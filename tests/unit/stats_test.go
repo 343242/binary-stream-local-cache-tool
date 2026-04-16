@@ -3,6 +3,7 @@ package unit
 import (
 	"context"
 	"testing"
+	"time"
 
 	"fastReadFile/pkg/cache"
 )
@@ -59,5 +60,32 @@ func TestStatsReflectSegmentFsyncs(t *testing.T) {
 	}
 	if stats.IO.SegmentFsyncTotal == 0 {
 		t.Fatalf("SegmentFsyncTotal = 0, want > 0")
+	}
+}
+
+func TestStatsDoNotDoubleCountAppendAndCheckpointFsyncs(t *testing.T) {
+	cfg := cache.DefaultConfig(t.TempDir())
+	cfg.SegmentFsyncBytes = 1
+	cfg.CheckpointBytes = 1
+	cfg.CheckpointInterval = time.Hour
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer engine.Close()
+
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+
+	stats, err := engine.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if stats.IO.SegmentFsyncTotal != 2 {
+		t.Fatalf("SegmentFsyncTotal = %d, want %d", stats.IO.SegmentFsyncTotal, 2)
 	}
 }

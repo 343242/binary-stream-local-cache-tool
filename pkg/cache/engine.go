@@ -51,24 +51,8 @@ func Open(cfg Config) (*StorageEngine, error) {
 	if err != nil {
 		return nil, err
 	}
-	walLog, err := wal.Open(cfg.RootDir)
+	walLog, checkpointStore, checkpoint, entries, segments, err := openRuntimeState(cfg.RootDir, cfg)
 	if err != nil {
-		return nil, err
-	}
-	checkpointStore := wal.NewCheckpointStore(cfg.RootDir)
-	checkpoint, err := checkpointStore.Load()
-	if err != nil {
-		_ = walLog.Close()
-		return nil, err
-	}
-	entries, err := walLog.Scan()
-	if err != nil {
-		_ = walLog.Close()
-		return nil, err
-	}
-	segments, err := segment.OpenManager(cfg.RootDir, cfg)
-	if err != nil {
-		_ = walLog.Close()
 		return nil, err
 	}
 	cursorStore := replaystore.NewCursorStore(cfg.RootDir)
@@ -85,17 +69,7 @@ func Open(cfg Config) (*StorageEngine, error) {
 		stats:            collector,
 	}
 	collector.RecordSegmentTailRepair(state.SegmentTailRepairsTotal)
-	collector.RecordSegmentTailRepair(segments.TailRepairCount())
-	collector.RecordSegmentFsyncCount(segments.DrainSyncCount())
-	if len(entries) > 0 {
-		engine.batchSeq = entries[len(entries)-1].BatchSeq
-		engine.latestWALEndOffset = entries[len(entries)-1].EndOffset
-	} else {
-		engine.latestWALEndOffset = checkpoint.LastWALEndOffset
-	}
-	if checkpoint.UpdatedAtUnixMs != 0 {
-		engine.lastCheckpointAt = time.UnixMilli(checkpoint.UpdatedAtUnixMs)
-	}
+	engine.applyRuntimeState(checkpoint, entries, segments)
 	return engine, nil
 }
 
@@ -152,9 +126,7 @@ func (s *StorageEngine) WriteBatch(_ context.Context, records []RawRecord) (Writ
 		result.WALBytesWritten += uint64(walMeta.BytesWritten)
 		result.SegmentBytesWritten += appendResult.BytesWritten
 		s.latestWALEndOffset = walMeta.EndOffset
-		if appendResult.Synced {
-			s.stats.RecordSegmentFsync()
-		}
+		s.stats.RecordSegmentFsyncCount(s.segments.DrainSyncCount())
 		if currentSegmentID != 0 && appendResult.SegmentID != currentSegmentID {
 			rotationTriggered = true
 		}
@@ -223,8 +195,23 @@ func (s *StorageEngine) Recover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	walLog, checkpointStore, checkpoint, entries, segments, err := openRuntimeState(s.cfg.RootDir, s.cfg)
+	if err != nil {
+		return err
+	}
+	oldWalLog := s.walLog
+	oldSegments := s.segments
+	s.walLog = walLog
+	s.checkpointStore = checkpointStore
+	s.applyRuntimeState(checkpoint, entries, segments)
 	s.nextWriteSeq = state.NextWriteSeq
 	s.stats.RecordSegmentTailRepair(state.SegmentTailRepairsTotal)
+	if oldSegments != nil {
+		_ = oldSegments.Close()
+	}
+	if oldWalLog != nil {
+		_ = oldWalLog.Close()
+	}
 	return nil
 }
 
@@ -464,7 +451,11 @@ func (s *StorageEngine) saveCheckpointLocked(now time.Time) error {
 		LastWALEndOffset: s.latestWALEndOffset,
 		UpdatedAtUnixMs:  now.UnixMilli(),
 	}
-	if err := s.checkpointStore.Save(checkpoint); err != nil {
+	save := s.checkpointStore.Save
+	if checkpoint.LastBatchSeq < s.lastCheckpoint.LastBatchSeq || checkpoint.LastWALEndOffset < s.lastCheckpoint.LastWALEndOffset {
+		save = s.checkpointStore.SaveReconciled
+	}
+	if err := save(checkpoint); err != nil {
 		return err
 	}
 	s.lastCheckpoint = checkpoint
@@ -480,15 +471,8 @@ func (s *StorageEngine) syncActiveSegmentLocked() error {
 	if err := s.segments.SyncActive(); err != nil {
 		return err
 	}
-	s.stats.RecordSegmentFsyncCount(maxUint64(1, s.segments.DrainSyncCount()))
+	s.stats.RecordSegmentFsyncCount(s.segments.DrainSyncCount())
 	return nil
-}
-
-func maxUint64(left, right uint64) uint64 {
-	if left > right {
-		return left
-	}
-	return right
 }
 
 func (s *StorageEngine) checkWritableStateLocked(op string) error {
@@ -532,6 +516,47 @@ func (s *StorageEngine) runCloseStep(ctx context.Context, step string) error {
 		closeStepHook(step)
 	}
 	return s.checkContext(ctx)
+}
+
+func openRuntimeState(root string, cfg Config) (*wal.Log, *wal.CheckpointStore, wal.Checkpoint, []wal.Entry, *segment.Manager, error) {
+	walLog, err := wal.Open(root)
+	if err != nil {
+		return nil, nil, wal.Checkpoint{}, nil, nil, err
+	}
+	checkpointStore := wal.NewCheckpointStore(root)
+	checkpoint, err := checkpointStore.Load()
+	if err != nil {
+		_ = walLog.Close()
+		return nil, nil, wal.Checkpoint{}, nil, nil, err
+	}
+	entries, err := walLog.Scan()
+	if err != nil {
+		_ = walLog.Close()
+		return nil, nil, wal.Checkpoint{}, nil, nil, err
+	}
+	segments, err := segment.OpenManager(root, cfg)
+	if err != nil {
+		_ = walLog.Close()
+		return nil, nil, wal.Checkpoint{}, nil, nil, err
+	}
+	return walLog, checkpointStore, checkpoint, entries, segments, nil
+}
+
+func (s *StorageEngine) applyRuntimeState(checkpoint wal.Checkpoint, entries []wal.Entry, segments *segment.Manager) {
+	s.segments = segments
+	s.lastCheckpoint = checkpoint
+	s.stats.RecordSegmentTailRepair(segments.TailRepairCount())
+	s.stats.RecordSegmentFsyncCount(segments.DrainSyncCount())
+	if len(entries) > 0 {
+		s.batchSeq = entries[len(entries)-1].BatchSeq
+		s.latestWALEndOffset = entries[len(entries)-1].EndOffset
+	} else {
+		s.batchSeq = checkpoint.LastBatchSeq
+		s.latestWALEndOffset = 0
+	}
+	if checkpoint.UpdatedAtUnixMs != 0 {
+		s.lastCheckpointAt = time.UnixMilli(checkpoint.UpdatedAtUnixMs)
+	}
 }
 
 type builtBlock struct {

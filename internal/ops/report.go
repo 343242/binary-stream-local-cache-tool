@@ -82,11 +82,40 @@ func Verify(root string) (string, error) {
 			continue
 		}
 		path := filepath.Join(segmentsDir, entry.Name())
-		if _, err := loadSegmentData(path); err != nil {
+		if err := verifySegment(path); err != nil {
 			return "", err
 		}
 	}
 	return "ok", nil
+}
+
+func verifySegment(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if footer, err := segment.ReadFooter(path); err == nil {
+		return verifySegmentBlocks(data[:footer.DataEndOffset])
+	}
+	if footer, ok := segment.RecoverFooterWithTail(path, data); ok {
+		return verifySegmentBlocks(data[:footer.DataEndOffset])
+	}
+	return verifySegmentBlocks(data)
+}
+
+func verifySegmentBlocks(data []byte) error {
+	offset := 0
+	for offset < len(data) {
+		blockLen, err := codec.BlockLength(data[offset:])
+		if err != nil {
+			return err
+		}
+		if _, err := codec.ParseBlock(data[offset : offset+blockLen]); err != nil {
+			return err
+		}
+		offset += blockLen
+	}
+	return nil
 }
 
 func RepairTail(root string, segmentID uint64) (string, error) {

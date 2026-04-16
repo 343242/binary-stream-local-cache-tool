@@ -456,6 +456,122 @@ func TestOpenRecordsSegmentTailRepairsFromRecovery(t *testing.T) {
 	}
 }
 
+func TestRecoverReloadsRuntimeStateAfterRepair(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+	cfg.CheckpointBytes = 1 << 30
+	cfg.CheckpointInterval = time.Hour
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	}); err != nil {
+		t.Fatalf("WriteBatch(first) error = %v", err)
+	}
+
+	walPath := filepath.Join(root, "wal", "active.wal")
+	if err := os.Truncate(walPath, 0); err != nil {
+		t.Fatalf("Truncate() error = %v", err)
+	}
+
+	if err := engine.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover() error = %v", err)
+	}
+	if _, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 2, Payload: []byte("b")},
+	}); err != nil {
+		t.Fatalf("WriteBatch(second) error = %v", err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	log, err := wal.Open(root)
+	if err != nil {
+		t.Fatalf("Open(wal) error = %v", err)
+	}
+	defer log.Close()
+
+	entries, err := log.Scan()
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want %d", len(entries), 1)
+	}
+	if entries[0].Offset != 0 {
+		t.Fatalf("Offset = %d, want %d", entries[0].Offset, 0)
+	}
+	block, err := codec.ParseBlock(entries[0].Block)
+	if err != nil {
+		t.Fatalf("ParseBlock() error = %v", err)
+	}
+	if block.FirstWriteSeq != 2 || block.LastWriteSeq != 2 {
+		t.Fatalf("write seq bounds = %d..%d, want 2..2", block.FirstWriteSeq, block.LastWriteSeq)
+	}
+}
+
+func TestOpenReconcilesCheckpointAheadOfRepairedWAL(t *testing.T) {
+	root := t.TempDir()
+	cfg := cache.DefaultConfig(root)
+	cfg.CheckpointBytes = 1 << 30
+	cfg.CheckpointInterval = time.Hour
+
+	engine, err := cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open(first) error = %v", err)
+	}
+	result, err := engine.WriteBatch(context.Background(), []cache.RawRecord{
+		{EventTimeUnixMs: 1, Payload: []byte("a")},
+	})
+	if err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("Close(first) error = %v", err)
+	}
+
+	checkpoint, err := wal.NewCheckpointStore(root).Load()
+	if err != nil {
+		t.Fatalf("Load(initial checkpoint) error = %v", err)
+	}
+	if checkpoint.LastBatchSeq != result.BatchSeq {
+		t.Fatalf("LastBatchSeq = %d, want %d", checkpoint.LastBatchSeq, result.BatchSeq)
+	}
+
+	walPath := filepath.Join(root, "wal", "active.wal")
+	stat, err := os.Stat(walPath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if err := os.Truncate(walPath, stat.Size()-1); err != nil {
+		t.Fatalf("Truncate() error = %v", err)
+	}
+
+	engine, err = cache.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open(repaired) error = %v", err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("Close(repaired) error = %v", err)
+	}
+
+	checkpoint, err = wal.NewCheckpointStore(root).Load()
+	if err != nil {
+		t.Fatalf("Load(reconciled checkpoint) error = %v", err)
+	}
+	if checkpoint.LastBatchSeq != result.BatchSeq {
+		t.Fatalf("LastBatchSeq = %d, want %d", checkpoint.LastBatchSeq, result.BatchSeq)
+	}
+	if checkpoint.LastWALEndOffset != 0 {
+		t.Fatalf("LastWALEndOffset = %d, want %d", checkpoint.LastWALEndOffset, 0)
+	}
+}
+
 func mustBuildLifecycleBlock(t *testing.T, firstSeq uint64, records []cache.RawRecord) []byte {
 	t.Helper()
 
