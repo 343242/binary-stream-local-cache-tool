@@ -7,6 +7,11 @@
   --ink-secondary: oklch(0.45 0.02 248);
   --accent: oklch(0.5 0.08 220);
   --danger: oklch(0.63 0.14 42);
+  --shell-frame-wash-start: oklch(0.72 0.09 220 / 0.12);
+  --shell-frame-wash-end: oklch(0.76 0.12 65 / 0.12);
+  --shell-sidebar-surface: oklch(1 0 0 / 0.72);
+  --shell-nav-active-surface: oklch(0.72 0.09 220 / 0.12);
+  --shell-nav-active-border: oklch(0.72 0.09 220 / 0.22);
   --space-3: 12px;
   --space-4: 16px;
   --space-6: 24px;

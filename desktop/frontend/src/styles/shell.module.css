@@ -5,8 +5,8 @@
   gap: var(--space-6);
   padding: var(--space-6);
   background:
-    radial-gradient(circle at top left, rgba(14, 116, 144, 0.12), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(184, 106, 0, 0.12), transparent 24%),
+    radial-gradient(circle at top left, var(--shell-frame-wash-start), transparent 28%),
+    radial-gradient(circle at bottom right, var(--shell-frame-wash-end), transparent 24%),
     var(--bg-canvas);
 }
 
@@ -15,7 +15,7 @@
   padding: var(--space-8) var(--space-4);
   border: 1px solid var(--border);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--shell-sidebar-surface);
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow-card);
 }
@@ -54,8 +54,8 @@
 }
 
 .navButtonActive {
-  background: rgba(14, 116, 144, 0.12);
-  border-color: rgba(14, 116, 144, 0.22);
+  background: var(--shell-nav-active-surface);
+  border-color: var(--shell-nav-active-border);
   color: var(--accent);
 }
 
