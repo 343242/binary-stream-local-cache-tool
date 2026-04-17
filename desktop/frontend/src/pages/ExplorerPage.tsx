@@ -1,6 +1,8 @@
 import DetailPane from "../components/DetailPane";
 import EmptyState from "../components/EmptyState";
 import styles from "../styles/shell.module.css";
+import LoadingSkeleton from "../components/LoadingSkeleton";
+import type { CheckpointDetailVM, CursorDetailVM, SegmentDetailVM, WALDetailVM } from "../bindings";
 import type { CursorRow, ExplorerTab, SegmentRow } from "../state/app-store";
 
 type ExplorerPageProps = {
@@ -9,6 +11,15 @@ type ExplorerPageProps = {
   segments: SegmentRow[];
   selectedSegment: SegmentRow | null;
   cursors: CursorRow[];
+  selectedCursor: CursorRow | null;
+  segmentDetail: SegmentDetailVM | null;
+  walDetail: WALDetailVM | null;
+  cursorDetail: CursorDetailVM | null;
+  checkpointDetail: CheckpointDetailVM | null;
+  detailLoading: boolean;
+  detailError: string | null;
+  onSelectSegment: (segment: SegmentRow) => void;
+  onSelectCursor: (cursor: CursorRow) => void;
 };
 
 const tabs: { key: ExplorerTab; label: string }[] = [
@@ -18,7 +29,22 @@ const tabs: { key: ExplorerTab; label: string }[] = [
   { key: "checkpoint", label: "Checkpoint" },
 ];
 
-export default function ExplorerPage({ activeTab, onTabChange, segments, selectedSegment, cursors }: ExplorerPageProps) {
+export default function ExplorerPage({
+  activeTab,
+  onTabChange,
+  segments,
+  selectedSegment,
+  cursors,
+  selectedCursor,
+  segmentDetail,
+  walDetail,
+  cursorDetail,
+  checkpointDetail,
+  detailLoading,
+  detailError,
+  onSelectSegment,
+  onSelectCursor,
+}: ExplorerPageProps) {
   return (
     <div className={styles.pageStack}>
       <section className={`${styles.panel} ${styles.panelPadding}`}>
@@ -58,7 +84,11 @@ export default function ExplorerPage({ activeTab, onTabChange, segments, selecte
               </thead>
               <tbody>
                 {segments.map((segment) => (
-                  <tr key={segment.segmentID}>
+                  <tr
+                    key={segment.segmentID}
+                    className={selectedSegment?.segmentID === segment.segmentID ? styles.tableRowSelected : ""}
+                    onClick={() => onSelectSegment(segment)}
+                  >
                     <td>{segment.segmentID}</td>
                     <td>{segment.sizeBytes}</td>
                     <td>{segment.lastWriteSeq}</td>
@@ -68,7 +98,14 @@ export default function ExplorerPage({ activeTab, onTabChange, segments, selecte
               </tbody>
             </table>
           ) : activeTab === "wal" ? (
-            <EmptyState title="No WAL Present" message="The active WAL file is not present in this demo workspace." />
+            <EmptyState
+              title={walDetail ? "WAL Detail Available" : "No WAL Present"}
+              message={
+                walDetail
+                  ? "The active WAL snapshot is loaded in the detail pane."
+                  : "The active WAL file is not present in this demo workspace."
+              }
+            />
           ) : activeTab === "cursors" ? (
             cursors.length === 0 ? (
               <EmptyState title="No Replay Cursors" message="No replay cursor files were found." />
@@ -83,7 +120,11 @@ export default function ExplorerPage({ activeTab, onTabChange, segments, selecte
                 </thead>
                 <tbody>
                   {cursors.map((cursor) => (
-                    <tr key={cursor.destination}>
+                    <tr
+                      key={cursor.destination}
+                      className={selectedCursor?.destination === cursor.destination ? styles.tableRowSelected : ""}
+                      onClick={() => onSelectCursor(cursor)}
+                    >
                       <td>{cursor.destination}</td>
                       <td>{cursor.writeSeq}</td>
                       <td>{cursor.status}</td>
@@ -93,43 +134,86 @@ export default function ExplorerPage({ activeTab, onTabChange, segments, selecte
               </table>
             )
           ) : (
-            <EmptyState title="No Checkpoint Written Yet" message="Checkpoint metadata has not been created yet." />
+            <EmptyState
+              title={checkpointDetail ? "Checkpoint Detail Available" : "No Checkpoint Written Yet"}
+              message={
+                checkpointDetail
+                  ? "Checkpoint metadata is loaded in the detail pane."
+                  : "Checkpoint metadata has not been created yet."
+              }
+            />
           )}
         </section>
 
         <DetailPane title="Detail Pane">
-          {activeTab !== "segments" || !selectedSegment ? (
+          {detailLoading ? <LoadingSkeleton rows={5} /> : null}
+          {!detailLoading && detailError ? <p className={styles.emptyCopy}>{detailError}</p> : null}
+          {!detailLoading && !detailError && activeTab === "segments" && !segmentDetail ? (
             <p className={styles.emptyCopy}>Select a row to inspect detailed fields and raw preview data.</p>
-          ) : (
+          ) : null}
+          {!detailLoading && !detailError && activeTab === "segments" && segmentDetail ? (
             <div className={styles.fieldList}>
-              <div className={styles.fieldRow}>
-                <span className={styles.fieldKey}>Segment ID</span>
-                <span>{selectedSegment.segmentID}</span>
-              </div>
-              <div className={styles.fieldRow}>
-                <span className={styles.fieldKey}>Health</span>
-                <span>{selectedSegment.health}</span>
-              </div>
-              <div className={styles.fieldRow}>
-                <span className={styles.fieldKey}>Write Seq Range</span>
-                <span>
-                  {selectedSegment.firstWriteSeq} - {selectedSegment.lastWriteSeq}
-                </span>
-              </div>
-              <div className={styles.fieldRow}>
-                <span className={styles.fieldKey}>Event Time Range</span>
-                <span>
-                  {selectedSegment.minEventTime} - {selectedSegment.maxEventTime}
-                </span>
-              </div>
-              <div className={styles.fieldRow}>
-                <span className={styles.fieldKey}>Raw Preview</span>
-                <span>Preview capped to first 64 KiB</span>
-              </div>
+              <ExplorerField label="Segment ID" value={`${segmentDetail.segmentID}`} />
+              <ExplorerField label="Path" value={segmentDetail.path} />
+              <ExplorerField label="Footer Health" value={segmentDetail.footerStatus} />
+              <ExplorerField label="Tail Status" value={segmentDetail.tailStatus} />
+              <ExplorerField label="Block Count" value={`${segmentDetail.blockCount}`} />
+              <ExplorerField label="Write Seq Range" value={`${segmentDetail.firstWriteSeq} - ${segmentDetail.lastWriteSeq}`} />
+              <ExplorerField label="Event Time Range" value={`${formatTimestamp(segmentDetail.minEventTime)} - ${formatTimestamp(segmentDetail.maxEventTime)}`} />
+              <ExplorerField label="Raw Preview" value={segmentDetail.rawPreviewHex || "Preview capped to first 64 KiB"} />
             </div>
-          )}
+          ) : null}
+          {!detailLoading && !detailError && activeTab === "wal" && walDetail ? (
+            <div className={styles.fieldList}>
+              <ExplorerField label="Path" value={walDetail.path} />
+              <ExplorerField label="Size" value={`${walDetail.sizeBytes}`} />
+              <ExplorerField label="Batch Seq Range" value={`${walDetail.firstBatchSeq} - ${walDetail.lastBatchSeq}`} />
+              <ExplorerField label="Last End Offset" value={`${walDetail.lastEndOffset}`} />
+              <ExplorerField label="Health" value={walDetail.health} />
+            </div>
+          ) : null}
+          {!detailLoading && !detailError && activeTab === "cursors" && !cursorDetail ? (
+            <p className={styles.emptyCopy}>Select a cursor row to inspect offsets, CRC status, and backup state.</p>
+          ) : null}
+          {!detailLoading && !detailError && activeTab === "cursors" && cursorDetail ? (
+            <div className={styles.fieldList}>
+              <ExplorerField label="Destination" value={cursorDetail.destination} />
+              <ExplorerField label="Write Seq" value={`${cursorDetail.writeSeq}`} />
+              <ExplorerField label="Segment ID" value={`${cursorDetail.segmentID}`} />
+              <ExplorerField label="Block Offset" value={`${cursorDetail.blockOffset}`} />
+              <ExplorerField label="Record Index" value={`${cursorDetail.recordIndex}`} />
+              <ExplorerField label="Updated At" value={formatTimestamp(cursorDetail.updatedAt)} />
+              <ExplorerField label="CRC Status" value={cursorDetail.crcStatus} />
+              <ExplorerField label="Backup Status" value={cursorDetail.backupStatus} />
+            </div>
+          ) : null}
+          {!detailLoading && !detailError && activeTab === "checkpoint" && checkpointDetail ? (
+            <div className={styles.fieldList}>
+              <ExplorerField label="Last Batch Seq" value={`${checkpointDetail.lastBatchSeq}`} />
+              <ExplorerField label="Last WAL End Offset" value={`${checkpointDetail.lastWALEndOffset}`} />
+              <ExplorerField label="Updated At" value={formatTimestamp(checkpointDetail.updatedAt)} />
+              <ExplorerField label="Version" value={`${checkpointDetail.version}`} />
+              <ExplorerField label="Integrity" value={checkpointDetail.integrityStatus} />
+            </div>
+          ) : null}
         </DetailPane>
       </div>
     </div>
   );
+}
+
+function ExplorerField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.fieldRow}>
+      <span className={styles.fieldKey}>{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+function formatTimestamp(value: number) {
+  if (!value) {
+    return "N/A";
+  }
+  return new Date(value).toISOString().replace("T", " ").slice(0, 16);
 }

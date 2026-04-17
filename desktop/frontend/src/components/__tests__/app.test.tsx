@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import App from "../../App";
 import { createInitialState, useAppStore } from "../../state/app-store";
@@ -13,6 +13,7 @@ function resetStore(partial?: Partial<ReturnType<typeof createInitialState>>) {
 describe("desktop app pages", () => {
   beforeEach(() => {
     resetStore();
+    delete window.go;
   });
 
   test("shows the landing empty state before a workspace is open", () => {
@@ -75,5 +76,81 @@ describe("desktop app pages", () => {
     render(<App />);
     fireEvent.click(screen.getAllByText("Reopen")[1]);
     expect(screen.getByText("/srv/cache/replica-west")).toBeInTheDocument();
+  });
+
+  test("shows loading feedback while a workspace is hydrating", () => {
+    resetStore({
+      workspaceLoadState: "hydrating",
+    });
+    render(<App />);
+    expect(screen.getByText("Loading workspace")).toBeInTheDocument();
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+  });
+
+  test("clicking a segment row updates the detail pane", async () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "explorer",
+      selectedSegment: null,
+    });
+    render(<App />);
+    expect(screen.getByText("Select a row to inspect detailed fields and raw preview data.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("48"));
+    await waitFor(() => {
+      expect(screen.getByText("segments/48.seg")).toBeInTheDocument();
+    });
+  });
+
+  test("explorer requests bound detail when bindings are available", async () => {
+    const getSegmentDetail = vi.fn().mockResolvedValue({
+      segmentID: 48,
+      path: "segments/48.seg",
+      sizeBytes: 134217728,
+      sealed: false,
+      footerStatus: "healthy",
+      tailStatus: "healthy",
+      firstWriteSeq: 12442,
+      lastWriteSeq: 12910,
+      recordCount: 468,
+      blockCount: 12,
+      minEventTime: 1713171600000,
+      maxEventTime: 1713172500000,
+      lastBatchSeq: 812,
+      rawPreviewHex: "00ff",
+      structuredPreview: [],
+    });
+
+    window.go = {
+      backend: {
+        App: {
+          OpenWorkspace: vi.fn(),
+          GetRecentWorkspaces: vi.fn().mockResolvedValue([]),
+          GetWorkspaceState: vi.fn().mockResolvedValue({ rootPath: "", mode: "NoWorkspace", lockMode: "N/A", health: "N/A" }),
+          GetSegmentDetail: getSegmentDetail,
+        },
+      },
+    } as any;
+
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "explorer",
+      selectedSegment: null,
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByText("48"));
+    await waitFor(() => expect(getSegmentDetail).toHaveBeenCalledWith(48));
   });
 });

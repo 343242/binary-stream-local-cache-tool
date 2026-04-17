@@ -39,7 +39,8 @@ describe("operations page", () => {
   });
 
   test("repair-tail requires danger confirmation", () => {
-    setOperationState({ selectedOperation: "repair-tail" });
+    const initial = createInitialState();
+    setOperationState({ selectedOperation: "repair-tail", selectedSegment: initial.recentSegments[0] });
     render(<App />);
     fireEvent.click(screen.getByText("Run Repair-tail"));
     expect(screen.getByText("Confirm Repair Tail")).toBeInTheDocument();
@@ -66,5 +67,28 @@ describe("operations page", () => {
       vi.runAllTimers();
     });
     expect(screen.getByText("succeeded")).toBeInTheDocument();
+  });
+
+  test("task panel renders progress metadata and cancel action", () => {
+    setOperationState({
+      currentTask: {
+        taskID: "task-1",
+        kind: "verify",
+        status: "running",
+        target: "",
+        phase: "running",
+        message: "Running operation",
+        startedAt: "2026-04-17 10:00",
+        updatedAt: "2026-04-17 10:01",
+        progressCurrent: 1,
+        progressTotal: 2,
+        canCancel: true,
+        error: null,
+      },
+    });
+    render(<App />);
+    expect(screen.getByText("Task timeline")).toBeInTheDocument();
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel Task" })).toBeInTheDocument();
   });
 });

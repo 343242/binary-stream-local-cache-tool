@@ -20,6 +20,7 @@ const operations: { key: OperationKey; title: string; description: string; maint
 
 type OperationsPageProps = {
   workspace: WorkspaceState | null;
+  selectedSegmentID: number | null;
   selectedOperation: OperationKey;
   latestResult: OperationResultState | null;
   currentTask: TaskState | null;
@@ -30,11 +31,13 @@ type OperationsPageProps = {
   onConfirmDialog: () => void;
   onDismissDialog: () => void;
   onOpenRepair: () => void;
+  onCancelTask: () => void;
   onDismissToast: (id: number) => void;
 };
 
 export default function OperationsPage({
   workspace,
+  selectedSegmentID,
   selectedOperation,
   latestResult,
   currentTask,
@@ -45,10 +48,13 @@ export default function OperationsPage({
   onConfirmDialog,
   onDismissDialog,
   onOpenRepair,
+  onCancelTask,
   onDismissToast,
 }: OperationsPageProps) {
   const operation = operations.find((item) => item.key === selectedOperation) ?? operations[0];
-  const blocked = operation.maintenanceRequired && workspace?.mode !== "HealthyMaintenance";
+  const blocked =
+    (operation.maintenanceRequired && workspace?.mode !== "HealthyMaintenance") ||
+    (operation.key === "repair-tail" && !selectedSegmentID);
 
   return (
     <div className={styles.pageStack}>
@@ -75,7 +81,11 @@ export default function OperationsPage({
             </div>
             <p className={styles.emptyCopy}>{operation.description}</p>
             {blocked ? (
-              <p className={styles.emptyCopy}>This action is blocked until the workspace holds MaintenanceExclusive.</p>
+              <p className={styles.emptyCopy}>
+                {operation.key === "repair-tail" && !selectedSegmentID
+                  ? "Select a segment from Explorer or use Open Repair from a verify result before running repair-tail."
+                  : "This action is blocked until the workspace holds MaintenanceExclusive."}
+              </p>
             ) : (
               <button className={`${styles.primaryButton} ${styles.focusable}`} onClick={() => onRunOperation(operation.key)} type="button">
                 Run {operation.title}
@@ -83,7 +93,7 @@ export default function OperationsPage({
             )}
           </section>
 
-          <TaskPanel task={currentTask} />
+          <TaskPanel task={currentTask} onCancel={onCancelTask} />
 
           <section className={`${styles.panel} ${styles.panelPadding}`}>
             <div className={styles.sectionHeader}>

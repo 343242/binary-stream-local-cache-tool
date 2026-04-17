@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import LoadingSkeleton from "./components/LoadingSkeleton";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import ConfigPage from "./pages/ConfigPage";
@@ -14,12 +15,20 @@ export default function App() {
   const {
     page,
     workspace,
+    workspaceLoadState,
     recentWorkspaces,
     overviewCards,
     warningSummary,
     recentSegments,
     recentCursors,
     selectedSegment,
+    selectedCursor,
+    segmentDetail,
+    walDetail,
+    cursorDetail,
+    checkpointDetail,
+    explorerDetailLoading,
+    explorerDetailError,
     configSections,
     explorerTab,
     selectedOperation,
@@ -29,6 +38,8 @@ export default function App() {
     confirmDialog,
     setPage,
     setExplorerTab,
+    setSelectedSegment,
+    setSelectedCursor,
     setSelectedOperation,
     initialiseRuntime,
     loadDemoWorkspace,
@@ -37,10 +48,12 @@ export default function App() {
     confirmOperation,
     dismissDialog,
     openRepairFromResult,
+    cancelCurrentTask,
     dismissToast,
   } = useAppStore();
 
   const isInvalidWorkspace = workspace?.mode === "InvalidWorkspace";
+  const isOpeningWorkspace = workspaceLoadState === "choosing" || workspaceLoadState === "hydrating";
 
   useEffect(() => {
     initialiseRuntime();
@@ -50,9 +63,17 @@ export default function App() {
     <main className={styles.frame}>
       <Sidebar activePage={page} onNavigate={setPage} />
       <section className={styles.content}>
-        <TopBar workspace={workspace} onRefresh={refresh} />
+        <TopBar workspace={workspace} onRefresh={refresh} workspaceLoadState={workspaceLoadState} />
         <div className={styles.pageStack}>
-          {!workspace || isInvalidWorkspace ? (
+          {isOpeningWorkspace && !workspace ? (
+            <section className={`${styles.panel} ${styles.panelPadding}`}>
+              <div className={styles.pageStack}>
+                <h3 className={styles.sectionTitle}>Loading workspace</h3>
+                <p className={styles.emptyCopy}>Validating the selected root and hydrating the initial snapshot.</p>
+                <LoadingSkeleton rows={4} />
+              </div>
+            </section>
+          ) : !workspace || isInvalidWorkspace ? (
             <LandingPage
               recentWorkspaces={recentWorkspaces}
               invalidWorkspace={
@@ -74,12 +95,22 @@ export default function App() {
               segments={recentSegments}
               selectedSegment={selectedSegment}
               cursors={recentCursors}
+              selectedCursor={selectedCursor}
+              segmentDetail={segmentDetail}
+              walDetail={walDetail}
+              cursorDetail={cursorDetail}
+              checkpointDetail={checkpointDetail}
+              detailLoading={explorerDetailLoading}
+              detailError={explorerDetailError}
+              onSelectSegment={setSelectedSegment}
+              onSelectCursor={setSelectedCursor}
             />
           ) : page === "config" ? (
             <ConfigPage hasWorkspace={Boolean(workspace)} sections={configSections} />
           ) : (
             <OperationsPage
               workspace={workspace}
+              selectedSegmentID={selectedSegment?.segmentID ?? null}
               selectedOperation={selectedOperation}
               latestResult={latestResult}
               currentTask={currentTask}
@@ -90,6 +121,7 @@ export default function App() {
               onConfirmDialog={confirmOperation}
               onDismissDialog={dismissDialog}
               onOpenRepair={openRepairFromResult}
+              onCancelTask={cancelCurrentTask}
               onDismissToast={dismissToast}
             />
           )}

@@ -1,11 +1,23 @@
 import { create } from "zustand";
 
-import { bindings, hasBindings, type ConfigVM, type OverviewVM, type PagedSegmentsVM, type WorkspaceState as BoundWorkspaceState } from "../bindings";
+import {
+  bindings,
+  hasBindings,
+  type CheckpointDetailVM,
+  type ConfigVM,
+  type CursorDetailVM,
+  type OverviewVM,
+  type PagedSegmentsVM,
+  type SegmentDetailVM,
+  type WALDetailVM,
+  type WorkspaceState as BoundWorkspaceState,
+} from "../bindings";
 import { hasRuntime, subscribeToEvent } from "../runtime";
 
 export type PageKey = "overview" | "explorer" | "config" | "operations";
 export type ExplorerTab = "segments" | "wal" | "cursors" | "checkpoint";
 export type OperationKey = "verify" | "close-check" | "repair-tail" | "shutdown";
+export type WorkspaceLoadState = "idle" | "choosing" | "hydrating" | "refreshing";
 
 export type WorkspaceState = {
   rootPath: string;
@@ -61,8 +73,15 @@ export type TaskState = {
   taskID: string;
   kind: OperationKey;
   status: "running" | "succeeded" | "failed" | "cancelled";
+  target: string;
   phase: string;
   message: string;
+  startedAt: string;
+  updatedAt: string;
+  progressCurrent: number | null;
+  progressTotal: number | null;
+  canCancel: boolean;
+  error: string | null;
 };
 
 export type ToastState = {
@@ -87,6 +106,7 @@ type ShellState = {
   title: string;
   page: PageKey;
   explorerTab: ExplorerTab;
+  workspaceLoadState: WorkspaceLoadState;
   workspace: WorkspaceState | null;
   recentWorkspaces: string[];
   overviewCards: OverviewCard[];
@@ -94,6 +114,13 @@ type ShellState = {
   recentSegments: SegmentRow[];
   recentCursors: CursorRow[];
   selectedSegment: SegmentRow | null;
+  selectedCursor: CursorRow | null;
+  segmentDetail: SegmentDetailVM | null;
+  walDetail: WALDetailVM | null;
+  cursorDetail: CursorDetailVM | null;
+  checkpointDetail: CheckpointDetailVM | null;
+  explorerDetailLoading: boolean;
+  explorerDetailError: string | null;
   configSections: Record<string, ConfigRow[]>;
   selectedOperation: OperationKey;
   latestResult: OperationResultState | null;
@@ -104,6 +131,8 @@ type ShellState = {
   setTitle: (title: string) => void;
   setPage: (page: PageKey) => void;
   setExplorerTab: (tab: ExplorerTab) => void;
+  setSelectedSegment: (segment: SegmentRow) => void;
+  setSelectedCursor: (cursor: CursorRow) => void;
   setSelectedOperation: (operation: OperationKey) => void;
   loadDemoWorkspace: (rootPath?: string) => void;
   markInvalidWorkspace: (path: string, reason: string) => void;
@@ -112,6 +141,7 @@ type ShellState = {
   confirmOperation: () => void;
   dismissDialog: () => void;
   openRepairFromResult: () => void;
+  cancelCurrentTask: () => void;
   dismissToast: (id: number) => void;
   initialiseRuntime: () => void;
 };
@@ -183,6 +213,8 @@ export const createInitialState = (): Omit<
   | "setTitle"
   | "setPage"
   | "setExplorerTab"
+  | "setSelectedSegment"
+  | "setSelectedCursor"
   | "setSelectedOperation"
   | "loadDemoWorkspace"
   | "markInvalidWorkspace"
@@ -191,12 +223,14 @@ export const createInitialState = (): Omit<
   | "confirmOperation"
   | "dismissDialog"
   | "openRepairFromResult"
+  | "cancelCurrentTask"
   | "dismissToast"
   | "initialiseRuntime"
 > => ({
   title: "Binary Stream Cache Tool",
   page: "overview",
   explorerTab: "segments",
+  workspaceLoadState: "idle",
   workspace: null,
   recentWorkspaces: [
     "/var/lib/binary-stream/cache-alpha",
@@ -206,7 +240,14 @@ export const createInitialState = (): Omit<
   warningSummary: ["Backlog estimate unavailable in demo mode."],
   recentSegments: demoSegments,
   recentCursors: demoCursors,
-  selectedSegment: demoSegments[0],
+  selectedSegment: null,
+  selectedCursor: null,
+  segmentDetail: null,
+  walDetail: null,
+  cursorDetail: null,
+  checkpointDetail: null,
+  explorerDetailLoading: false,
+  explorerDetailError: null,
   configSections: demoConfigSections,
   selectedOperation: "verify",
   latestResult: null,
@@ -220,22 +261,55 @@ export const useAppStore = create<ShellState>((set, get) => ({
   ...createInitialState(),
   setTitle: (title) => set({ title }),
   setPage: (page) => set({ page }),
-  setExplorerTab: (tab) => set({ explorerTab: tab }),
+  setExplorerTab: (tab) => {
+    set({
+      explorerTab: tab,
+      explorerDetailError: null,
+      explorerDetailLoading: tab === "wal" || tab === "checkpoint",
+      segmentDetail: tab === "segments" ? get().segmentDetail : null,
+      cursorDetail: tab === "cursors" ? get().cursorDetail : null,
+      walDetail: tab === "wal" ? get().walDetail : null,
+      checkpointDetail: tab === "checkpoint" ? get().checkpointDetail : null,
+    });
+    void loadExplorerTabDetail(tab, set, get);
+  },
+  setSelectedSegment: (segment) => {
+    set({
+      selectedSegment: segment,
+      segmentDetail: null,
+      explorerDetailLoading: true,
+      explorerDetailError: null,
+    });
+    void loadSegmentDetail(segment, set);
+  },
+  setSelectedCursor: (cursor) => {
+    set({
+      selectedCursor: cursor,
+      cursorDetail: null,
+      explorerDetailLoading: true,
+      explorerDetailError: null,
+    });
+    void loadCursorDetail(cursor, set);
+  },
   setSelectedOperation: (operation) => set({ selectedOperation: operation }),
   loadDemoWorkspace: (rootPath) => {
     if (hasBindings()) {
       if (rootPath) {
-        void hydrateFromBindings(rootPath, set);
+        void hydrateFromBindings(rootPath, set, "hydrating");
       } else {
+        set({ workspaceLoadState: "choosing" });
         void bindings.chooseWorkspace().then((workspace) => {
           if (workspace.rootPath) {
-            void hydrateFromBindings(workspace.rootPath, set);
+            void hydrateFromBindings(workspace.rootPath, set, "hydrating");
+          } else {
+            set({ workspaceLoadState: "idle" });
           }
-        }).catch(() => undefined);
+        }).catch(() => set({ workspaceLoadState: "idle" }));
       }
       return;
     }
     set({
+      workspaceLoadState: "idle",
       workspace: {
         rootPath: rootPath ?? "/var/lib/binary-stream/cache-alpha",
         mode: "HealthyObserver",
@@ -255,16 +329,19 @@ export const useAppStore = create<ShellState>((set, get) => ({
         stale: false,
         invalidReason: reason,
       },
+      workspaceLoadState: "idle",
     }),
   refresh: () => {
     if (hasBindings()) {
       const workspace = get().workspace;
       if (workspace?.rootPath) {
-        void hydrateFromBindings(workspace.rootPath, set);
+        set({ workspaceLoadState: "refreshing" });
+        void hydrateFromBindings(workspace.rootPath, set, "refreshing");
         return;
       }
     }
     set((state) => ({
+      workspaceLoadState: "idle",
       workspace: state.workspace ? { ...state.workspace, stale: false } : state.workspace,
     }));
   },
@@ -301,10 +378,42 @@ export const useAppStore = create<ShellState>((set, get) => ({
   },
   dismissDialog: () => set({ confirmDialog: null }),
   openRepairFromResult: () =>
-    set({
+    set((state) => ({
       selectedOperation: "repair-tail",
       page: "operations",
-    }),
+      selectedSegment:
+        state.latestResult?.repairableSegment
+          ? state.recentSegments.find((segment) => segment.segmentID === state.latestResult?.repairableSegment) ?? state.selectedSegment
+          : state.selectedSegment,
+    })),
+  cancelCurrentTask: () => {
+    const task = get().currentTask;
+    if (!task || !task.canCancel) {
+      return;
+    }
+    if (hasBindings()) {
+      void bindings.cancelTask(task.taskID).catch(() => undefined);
+      return;
+    }
+    set((state) => ({
+      currentTask: {
+        ...task,
+        status: "cancelled",
+        updatedAt: formatTimestamp(Date.now()),
+      },
+      toasts: [
+        ...state.toasts,
+        {
+          id: state.nextToastID,
+          level: "info",
+          title: `${task.kind} cancelled`,
+          message: "Task cancelled from the desktop shell.",
+          durationLabel: "4s",
+        },
+      ],
+      nextToastID: state.nextToastID + 1,
+    }));
+  },
   dismissToast: (id) =>
     set((state) => ({
       toasts: state.toasts.filter((toast) => toast.id !== id),
@@ -314,7 +423,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
       void bindings.getRecentWorkspaces().then((recentWorkspaces) => set({ recentWorkspaces })).catch(() => undefined);
       void bindings.getWorkspaceState().then((workspace) => {
         if (workspace.rootPath) {
-          void hydrateFromBindings(workspace.rootPath, set);
+          void hydrateFromBindings(workspace.rootPath, set, "hydrating");
         }
       }).catch(() => undefined);
     }
@@ -329,7 +438,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
           const mapped = mapWorkspaceState(workspace as BoundWorkspaceState);
           set({ workspace: mapped });
           if (mapped.rootPath && mapped.mode !== "InvalidWorkspace") {
-            void hydrateFromBindings(mapped.rootPath, set);
+            void hydrateFromBindings(mapped.rootPath, set, "hydrating");
           }
         }),
         subscribeToEvent("task:started", (payload) => {
@@ -375,12 +484,28 @@ export const useAppStore = create<ShellState>((set, get) => ({
 let runtimeInitialised = false;
 let runtimeUnsubscribers: Array<() => void> = [];
 
-async function hydrateFromBindings(rootPath: string, set: typeof useAppStore.setState) {
+async function hydrateFromBindings(
+  rootPath: string,
+  set: typeof useAppStore.setState,
+  workspaceLoadState: WorkspaceLoadState,
+) {
+  set({
+    workspaceLoadState,
+    explorerDetailLoading: false,
+    explorerDetailError: null,
+    segmentDetail: null,
+    walDetail: null,
+    cursorDetail: null,
+    checkpointDetail: null,
+    selectedSegment: null,
+    selectedCursor: null,
+  });
   try {
     const workspace = await bindings.openWorkspace(rootPath);
     if (workspace.mode === "InvalidWorkspace") {
       set({
         workspace: mapWorkspaceState(workspace),
+        workspaceLoadState: "idle",
       });
       return;
     }
@@ -403,11 +528,14 @@ async function hydrateFromBindings(rootPath: string, set: typeof useAppStore.set
         updatedAt: formatTimestamp(cursor.updatedAt),
         status: cursor.status,
       })),
-      selectedSegment: mapSegments(segments)[0] ?? null,
       configSections: mapConfigSections(config),
+      selectedSegment: null,
+      selectedCursor: null,
+      workspaceLoadState: "idle",
     });
   } catch {
     set({
+      workspaceLoadState: "idle",
       workspace: {
         rootPath,
         mode: "DegradedReadOnly",
@@ -416,6 +544,121 @@ async function hydrateFromBindings(rootPath: string, set: typeof useAppStore.set
         stale: true,
         invalidReason: "Backend binding failed; showing fallback shell state.",
       },
+    });
+  }
+}
+
+async function loadExplorerTabDetail(
+  tab: ExplorerTab,
+  set: typeof useAppStore.setState,
+  get: typeof useAppStore.getState,
+) {
+  if (tab === "segments" || tab === "cursors") {
+    set({ explorerDetailLoading: false, explorerDetailError: null });
+    return;
+  }
+
+  if (!hasBindings()) {
+    set({
+      explorerDetailLoading: false,
+      explorerDetailError: null,
+      walDetail:
+        tab === "wal"
+          ? {
+              path: "wal/active.wal",
+              sizeBytes: 0,
+              firstBatchSeq: 0,
+              lastBatchSeq: 0,
+              lastEndOffset: 0,
+              health: "missing",
+            }
+          : null,
+      checkpointDetail:
+        tab === "checkpoint"
+          ? {
+              lastBatchSeq: 0,
+              lastWALEndOffset: 0,
+              updatedAt: 0,
+              version: 0,
+              integrityStatus: "missing",
+            }
+          : null,
+    });
+    return;
+  }
+
+  try {
+    if (tab === "wal") {
+      const walDetail = await bindings.getWALDetail();
+      set({
+        walDetail,
+        explorerDetailLoading: false,
+        explorerDetailError: null,
+      });
+      return;
+    }
+    const checkpointDetail = await bindings.getCheckpointDetail();
+    set({
+      checkpointDetail,
+      explorerDetailLoading: false,
+      explorerDetailError: null,
+    });
+  } catch {
+    set({
+      explorerDetailLoading: false,
+      explorerDetailError: "Detail data could not be loaded for the selected tab.",
+      walDetail: tab === "wal" ? null : get().walDetail,
+      checkpointDetail: tab === "checkpoint" ? null : get().checkpointDetail,
+    });
+  }
+}
+
+async function loadSegmentDetail(segment: SegmentRow, set: typeof useAppStore.setState) {
+  if (!hasBindings()) {
+    set({
+      segmentDetail: buildFallbackSegmentDetail(segment),
+      explorerDetailLoading: false,
+      explorerDetailError: null,
+    });
+    return;
+  }
+  try {
+    const segmentDetail = await bindings.getSegmentDetail(segment.segmentID);
+    set({
+      segmentDetail,
+      explorerDetailLoading: false,
+      explorerDetailError: null,
+    });
+  } catch {
+    set({
+      segmentDetail: null,
+      explorerDetailLoading: false,
+      explorerDetailError: "Segment detail could not be loaded.",
+    });
+  }
+}
+
+async function loadCursorDetail(cursor: CursorRow, set: typeof useAppStore.setState) {
+  if (!hasBindings()) {
+    set({
+      cursorDetail: buildFallbackCursorDetail(cursor),
+      explorerDetailLoading: false,
+      explorerDetailError: null,
+    });
+    return;
+  }
+  try {
+    const cursorDetail = await bindings.getCursorDetail(cursor.destination);
+    set({
+      cursorDetail,
+      explorerDetailLoading: false,
+      explorerDetailError: null,
+    });
+  } catch {
+    set({
+      cursorDetail: null,
+      explorerDetailLoading: false,
+      explorerDetailError: "Cursor detail could not be loaded.",
     });
   }
 }
@@ -493,6 +736,45 @@ function formatTimestamp(value: number) {
   return new Date(value).toISOString().replace("T", " ").slice(0, 16);
 }
 
+function buildFallbackSegmentDetail(segment: SegmentRow): SegmentDetailVM {
+  const minEventTime = Date.parse(segment.minEventTime.replace(" ", "T"));
+  const maxEventTime = Date.parse(segment.maxEventTime.replace(" ", "T"));
+  return {
+    segmentID: segment.segmentID,
+    path: `segments/${segment.segmentID}.seg`,
+    sizeBytes: Number(segment.sizeBytes.replace(/,/g, "")),
+    sealed: segment.sealed,
+    footerStatus: segment.health,
+    tailStatus: "preview-only",
+    firstWriteSeq: segment.firstWriteSeq,
+    lastWriteSeq: segment.lastWriteSeq,
+    recordCount: segment.recordCount,
+    blockCount: 0,
+    minEventTime: Number.isFinite(minEventTime) ? minEventTime : 0,
+    maxEventTime: Number.isFinite(maxEventTime) ? maxEventTime : 0,
+    lastBatchSeq: segment.lastBatchSeq,
+    rawPreviewHex: "Preview capped to first 64 KiB",
+    structuredPreview: [
+      { key: "Health", value: segment.health },
+      { key: "Write Seq Range", value: `${segment.firstWriteSeq} - ${segment.lastWriteSeq}` },
+    ],
+  };
+}
+
+function buildFallbackCursorDetail(cursor: CursorRow): CursorDetailVM {
+  const updatedAt = Date.parse(cursor.updatedAt.replace(" ", "T"));
+  return {
+    destination: cursor.destination,
+    segmentID: 0,
+    blockOffset: 0,
+    recordIndex: 0,
+    writeSeq: cursor.writeSeq,
+    updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
+    crcStatus: cursor.status,
+    backupStatus: "N/A",
+  };
+}
+
 function startOperation(operation: OperationKey, set: typeof useAppStore.setState, get: typeof useAppStore.getState) {
   if (hasBindings()) {
     void startBoundOperation(operation, set, get);
@@ -506,8 +788,15 @@ function startOperation(operation: OperationKey, set: typeof useAppStore.setStat
       taskID,
       kind: operation,
       status: "running",
+      target: "",
       phase: "starting",
       message: "Preparing operation",
+      startedAt: formatTimestamp(Date.now()),
+      updatedAt: formatTimestamp(Date.now()),
+      progressCurrent: 1,
+      progressTotal: 2,
+      canCancel: true,
+      error: null,
     },
   });
 
@@ -519,8 +808,15 @@ function startOperation(operation: OperationKey, set: typeof useAppStore.setStat
         taskID,
         kind: operation,
         status: finish.status,
+        target: "",
         phase: "finished",
         message: finish.result.summary,
+        startedAt: formatTimestamp(Date.now()),
+        updatedAt: formatTimestamp(Date.now()),
+        progressCurrent: 2,
+        progressTotal: 2,
+        canCancel: false,
+        error: null,
       },
       toasts: [...state.toasts, finish.toast],
       nextToastID: state.nextToastID + 1,
@@ -559,8 +855,15 @@ async function startBoundOperation(operation: OperationKey, set: typeof useAppSt
         taskID: `ui-${Date.now()}`,
         kind: operation,
         status: "failed",
+        target: "",
         phase: "finished",
         message: "Backend operation failed to start.",
+        startedAt: formatTimestamp(Date.now()),
+        updatedAt: formatTimestamp(Date.now()),
+        progressCurrent: null,
+        progressTotal: null,
+        canCancel: false,
+        error: "Backend operation failed to start.",
       },
     });
   }
@@ -647,8 +950,15 @@ function mapTask(task: Record<string, unknown>): TaskState {
     taskID: `${task.taskID ?? task.TaskID ?? ""}`,
     kind: `${task.kind ?? task.Kind ?? "verify"}` as OperationKey,
     status: `${task.status ?? task.Status ?? "running"}` as TaskState["status"],
+    target: `${task.target ?? task.Target ?? ""}`,
     phase: `${task.phase ?? task.Phase ?? ""}`,
     message: `${task.message ?? task.Message ?? ""}`,
+    startedAt: formatTimestamp(Number(task.startedAt ?? task.StartedAt ?? 0)),
+    updatedAt: formatTimestamp(Number(task.updatedAt ?? task.UpdatedAt ?? 0)),
+    progressCurrent: parseOptionalNumber(task.progressCurrent ?? task.ProgressCurrent),
+    progressTotal: parseOptionalNumber(task.progressTotal ?? task.ProgressTotal),
+    canCancel: Boolean(task.canCancel ?? task.CanCancel),
+    error: mapTaskError(task.error ?? task.Error),
   };
 }
 
@@ -679,7 +989,7 @@ function makeToastFromTask(task: TaskState, result: OperationResultState | null,
     id,
     level,
     title: `${task.kind} ${task.status}`,
-    message: result?.summary || task.message || "Task update received.",
+    message: result?.summary || task.error || task.message || "Task update received.",
     durationLabel: level === "error" ? "persistent" : "4s",
   };
 }
@@ -689,4 +999,27 @@ function pickPayload(payload: unknown) {
     return payload[0];
   }
   return payload;
+}
+
+function parseOptionalNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === "object" && value !== null && "value" in value) {
+    return parseOptionalNumber((value as { value?: unknown }).value);
+  }
+  return null;
+}
+
+function mapTaskError(value: unknown): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const message = record.message ?? record.Message ?? record.title ?? record.Title;
+  return typeof message === "string" && message !== "" ? message : null;
 }

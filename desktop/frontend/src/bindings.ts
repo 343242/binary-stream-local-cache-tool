@@ -64,11 +64,62 @@ export type PagedSegmentsVM = {
   hasNext: boolean;
 };
 
+export type KeyValueVM = {
+  key: string;
+  value: string;
+};
+
+export type SegmentDetailVM = {
+  segmentID: number;
+  path: string;
+  sizeBytes: number;
+  sealed: boolean;
+  footerStatus: string;
+  tailStatus: string;
+  firstWriteSeq: number;
+  lastWriteSeq: number;
+  recordCount: number;
+  blockCount: number;
+  minEventTime: number;
+  maxEventTime: number;
+  lastBatchSeq: number;
+  rawPreviewHex: string;
+  structuredPreview: KeyValueVM[];
+};
+
 export type CursorSummaryVM = {
   destination: string;
   writeSeq: number;
   updatedAt: number;
   status: string;
+};
+
+export type CursorDetailVM = {
+  destination: string;
+  segmentID: number;
+  blockOffset: number;
+  recordIndex: number;
+  writeSeq: number;
+  updatedAt: number;
+  crcStatus: string;
+  backupStatus: string;
+};
+
+export type CheckpointDetailVM = {
+  lastBatchSeq: number;
+  lastWALEndOffset: number;
+  updatedAt: number;
+  version: number;
+  integrityStatus: string;
+};
+
+export type WALDetailVM = {
+  path: string;
+  sizeBytes: number;
+  firstBatchSeq: number;
+  lastBatchSeq: number;
+  lastEndOffset: number;
+  health: string;
 };
 
 export type ConfigFieldVM = {
@@ -93,6 +144,39 @@ export type ConfigVM = {
   retentionDays: ConfigFieldVM;
 };
 
+export type GUIErrorVM = {
+  code: string;
+  title: string;
+  message: string;
+  operation: string;
+  path: string;
+  recoverable: boolean;
+  details: string;
+  suggestedAction: string;
+};
+
+export type OperationResultVM = {
+  summary: string;
+  details: KeyValueVM[];
+  changed: boolean;
+};
+
+export type TaskVM = {
+  taskID: string;
+  kind: string;
+  target: string;
+  status: string;
+  phase: string;
+  startedAt: number;
+  updatedAt: number;
+  progressCurrent?: number | null;
+  progressTotal?: number | null;
+  message: string;
+  canCancel: boolean;
+  result?: OperationResultVM | null;
+  error?: GUIErrorVM | null;
+};
+
 type BackendBindings = {
   OpenWorkspace?: (rootPath: string) => Promise<WorkspaceState>;
   ChooseWorkspace?: () => Promise<WorkspaceState>;
@@ -101,12 +185,16 @@ type BackendBindings = {
   GetRecentWorkspaces?: () => Promise<string[]>;
   GetOverview?: () => Promise<OverviewVM>;
   ListSegments?: (page: number, pageSize: number) => Promise<PagedSegmentsVM>;
+  GetSegmentDetail?: (segmentID: number) => Promise<SegmentDetailVM>;
+  GetWALDetail?: () => Promise<WALDetailVM>;
   ListCursors?: () => Promise<CursorSummaryVM[]>;
+  GetCursorDetail?: (destination: string) => Promise<CursorDetailVM>;
+  GetCheckpointDetail?: () => Promise<CheckpointDetailVM>;
   GetConfig?: () => Promise<ConfigVM>;
-  RunVerify?: () => Promise<any>;
-  RunCloseCheck?: () => Promise<any>;
-  RunRepairTail?: (segmentID: number) => Promise<any>;
-  RunShutdown?: () => Promise<any>;
+  RunVerify?: () => Promise<TaskVM>;
+  RunCloseCheck?: () => Promise<TaskVM>;
+  RunRepairTail?: (segmentID: number) => Promise<TaskVM>;
+  RunShutdown?: () => Promise<TaskVM>;
   CancelTask?: (taskID: string) => Promise<void>;
 };
 
@@ -150,8 +238,20 @@ export const bindings = {
   listSegments(page: number, pageSize: number) {
     return window.go?.backend?.App?.ListSegments?.(page, pageSize) ?? missingBinding("ListSegments");
   },
+  getSegmentDetail(segmentID: number) {
+    return window.go?.backend?.App?.GetSegmentDetail?.(segmentID) ?? missingBinding("GetSegmentDetail");
+  },
+  getWALDetail() {
+    return window.go?.backend?.App?.GetWALDetail?.() ?? missingBinding("GetWALDetail");
+  },
   listCursors() {
     return window.go?.backend?.App?.ListCursors?.() ?? missingBinding("ListCursors");
+  },
+  getCursorDetail(destination: string) {
+    return window.go?.backend?.App?.GetCursorDetail?.(destination) ?? missingBinding("GetCursorDetail");
+  },
+  getCheckpointDetail() {
+    return window.go?.backend?.App?.GetCheckpointDetail?.() ?? missingBinding("GetCheckpointDetail");
   },
   getConfig() {
     return window.go?.backend?.App?.GetConfig?.() ?? missingBinding("GetConfig");
