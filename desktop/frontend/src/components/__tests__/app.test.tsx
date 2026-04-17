@@ -113,6 +113,47 @@ describe("desktop app pages", () => {
     expect(screen.getByText("No Segments Found")).toBeInTheDocument();
   });
 
+  it("keeps explorer detail content separate from the row list", () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "explorer",
+    });
+
+    render(<App />);
+
+    expect(screen.getByText("Detail pane")).toBeInTheDocument();
+    expect(screen.getByText("Inspection notes")).toBeInTheDocument();
+    expect(screen.getByText("Select a row to inspect detailed fields and raw preview data.")).toBeInTheDocument();
+  });
+
+  it("keeps explorer audit copy visible when wal detail is unavailable", () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "explorer",
+      explorerTab: "wal",
+      walDetail: null,
+      explorerDetailLoading: false,
+      explorerDetailError: null,
+    });
+
+    render(<App />);
+
+    expect(screen.getByText("No WAL Present")).toBeInTheDocument();
+    expect(screen.getByText("No write-ahead log snapshot is available for inspection in this workspace.")).toBeInTheDocument();
+  });
+
   test("renders the config page as read-only", () => {
     resetStore({
       workspace: {
@@ -127,6 +168,24 @@ describe("desktop app pages", () => {
     render(<App />);
     expect(screen.getByText("Read-only inspection. Persistent configuration editing is deferred.")).toBeInTheDocument();
     expect(screen.getAllByText("Allowed Range").length).toBeGreaterThan(0);
+  });
+
+  it("marks config as read-only audit content", () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "config",
+    });
+
+    render(<App />);
+
+    expect(screen.getByText("Configuration audit ledger")).toBeInTheDocument();
+    expect(screen.getByText(/read-only inspection/i)).toBeInTheDocument();
   });
 
   test("reopen uses the selected recent workspace path", () => {

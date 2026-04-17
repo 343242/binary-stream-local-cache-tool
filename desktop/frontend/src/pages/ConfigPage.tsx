@@ -17,29 +17,47 @@ export default function ConfigPage({ hasWorkspace, sections }: ConfigPageProps) 
     );
   }
 
+  const sectionCount = Object.keys(sections).length;
+  const fieldCount = Object.values(sections).reduce((count, rows) => count + rows.length, 0);
+
   return (
     <div className={styles.pageStack}>
       <section className={`${styles.panel} ${styles.panelPadding}`}>
         <div className={styles.sectionHeader}>
-          <h3 className={styles.sectionTitle}>Effective Configuration</h3>
+          <div className={styles.pageStack}>
+            <p className={styles.eyebrow}>Configuration audit surface</p>
+            <h3 className={styles.sectionTitle}>Configuration audit ledger</h3>
+          </div>
+          <div className={styles.badgeRow}>
+            <span className={styles.badge}>{sectionCount} sections</span>
+            <span className={styles.badge}>{fieldCount} captured fields</span>
+          </div>
         </div>
         <p className={styles.readonlyNote}>Read-only inspection. Persistent configuration editing is deferred.</p>
+        <p className={styles.emptyCopy}>
+          Effective values, startup defaults, and allowed ranges are preserved here as an audit ledger for operator review.
+        </p>
       </section>
 
       {Object.entries(sections).map(([section, rows]) => (
         <section key={section} className={`${styles.panel} ${styles.panelPadding} ${styles.configSection}`}>
           <div className={styles.sectionHeader}>
-            <h3 className={styles.sectionTitle}>{section}</h3>
+            <div className={styles.pageStack}>
+              <p className={styles.eyebrow}>Audit section</p>
+              <h3 className={styles.sectionTitle}>{section} ledger</h3>
+            </div>
+            <span className={styles.badge}>{rows.length} fields</span>
           </div>
+          <p className={styles.emptyCopy}>Captured startup-only values for audit comparison and maintenance review.</p>
           <div className={styles.configTableWrapper}>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Field</th>
-                  <th>Effective Value</th>
-                  <th>Default Value</th>
+                  <th>Setting</th>
+                  <th>Effective Snapshot</th>
+                  <th>Startup Default</th>
                   <th>Allowed Range</th>
-                  <th>Note</th>
+                  <th>Audit Note</th>
                 </tr>
               </thead>
               <tbody>
