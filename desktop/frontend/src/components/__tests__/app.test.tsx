@@ -69,6 +69,12 @@ describe("desktop app pages", () => {
     expect(screen.getByText("Recent Segments")).toBeInTheDocument();
   });
 
+  it("renders overview as a narrative page with warnings and activity regions", () => {
+    render(<App />);
+    expect(screen.getByText(/maintenance windows/i)).toBeInTheDocument();
+    expect(screen.getByText(/recent activity/i)).toBeInTheDocument();
+  });
+
   test("shows no segments empty state when explorer has zero rows", () => {
     resetStore({
       workspace: {

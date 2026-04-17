@@ -6,9 +6,13 @@ type LoadingSkeletonProps = {
 
 export default function LoadingSkeleton({ rows = 3 }: LoadingSkeletonProps) {
   return (
-    <div className={styles.pageStack} aria-label="Loading">
+    <div aria-label="Loading" aria-live="polite" className={styles.pageStack} role="status">
       {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className={styles.skeleton} />
+        <div
+          key={index}
+          className={styles.skeleton}
+          style={{ width: index === 0 ? "100%" : index % 2 === 0 ? "72%" : "88%" }}
+        />
       ))}
     </div>
   );

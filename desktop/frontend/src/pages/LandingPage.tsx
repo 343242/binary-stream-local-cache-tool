@@ -11,6 +11,7 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
   if (invalidWorkspace) {
     return (
       <EmptyState
+        eyebrow="Landing"
         title="Not a Cache Workspace"
         message={`${invalidWorkspace.path} does not contain the expected cache layout. ${invalidWorkspace.reason}`}
         actionLabel="Choose Another Directory"
@@ -21,11 +22,11 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
 
   return (
     <section className={`${styles.panel} ${styles.hero}`}>
-      <p className={styles.cardLabel}>Landing</p>
-      <h2 className={styles.heroTitle}>Open one cache root and inspect it safely.</h2>
+      <p className={styles.eyebrow}>Landing</p>
+      <h2 className={styles.heroTitle}>Open one cache root with enough context for routine checks and enough guardrails for maintenance windows.</h2>
       <p className={styles.heroCopy}>
-        This phase-1 desktop console opens a single local workspace, defaults to observer mode, and requires explicit
-        lock transitions before maintenance actions.
+        Phase-1 desktop console for cache inspection, replay diagnostics, and guarded operations. Start in observer mode,
+        keep the shell readable for routine checks, and escalate deliberately only when the shell calls for operator handoff.
       </p>
       <div>
         <button className={`${styles.primaryButton} ${styles.focusable}`} onClick={() => onOpenWorkspace()} type="button">
@@ -34,8 +35,12 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
       </div>
       <section className={styles.pageStack}>
         <div className={styles.sectionHeader}>
-          <h3 className={styles.sectionTitle}>Recent Directories</h3>
+          <div className={styles.pageStack}>
+            <p className={styles.eyebrow}>Recent activity</p>
+            <h3 className={styles.sectionTitle}>Recent Directories</h3>
+          </div>
         </div>
+        <p className={styles.emptyCopy}>Resume the last operator roots inspected from this shell or open a new cache workspace.</p>
         <div className={styles.recentList}>
           {recentWorkspaces.slice(0, 5).map((workspace) => (
             <div key={workspace} className={styles.recentItem}>
