@@ -1,20 +1,33 @@
 :root {
-  color-scheme: light dark;
-  --bg: #f3f5f7;
-  --panel: #ffffff;
-  --panel-alt: #e9eef2;
-  --text-primary: #13202b;
-  --text-secondary: #4e6375;
-  --accent: #0e7490;
-  --border: #d7e0e7;
-  --radius-card: 12px;
+  color-scheme: light;
+  --bg-canvas: oklch(0.96 0.012 85);
+  --bg-panel: oklch(0.985 0.008 85);
+  --bg-panel-strong: oklch(0.28 0.04 248);
+  --ink-primary: oklch(0.22 0.03 248);
+  --ink-secondary: oklch(0.45 0.02 248);
+  --accent: oklch(0.5 0.08 220);
+  --danger: oklch(0.63 0.14 42);
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --bg: var(--bg-canvas);
+  --panel: var(--bg-panel);
+  --panel-alt: oklch(0.95 0.012 85);
+  --text-primary: var(--ink-primary);
+  --text-secondary: var(--ink-secondary);
+  --border: oklch(0.89 0.01 85);
+  --radius-card: 16px;
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.12);
   font-family: "IBM Plex Sans", sans-serif;
 }
 
 body {
   margin: 0;
-  background: radial-gradient(circle at top, #ffffff 0%, var(--bg) 55%, #dde7ee 100%);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.92) 0%, transparent 42%),
+    linear-gradient(180deg, oklch(1 0 0) 0%, var(--bg-canvas) 100%);
   color: var(--text-primary);
 }
 

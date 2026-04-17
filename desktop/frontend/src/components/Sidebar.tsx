@@ -15,7 +15,7 @@ type SidebarProps = {
 
 export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   return (
-    <aside className={styles.sidebar}>
+    <aside aria-label="Primary workspace" className={styles.sidebar}>
       <div className={styles.brand}>
         <h1 className={styles.brandName}>Binary Stream Cache Tool</h1>
         <p className={styles.brandMeta}>Observer-first desktop console</p>
