@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import App from "../../App";
 import { createInitialState, useAppStore } from "../../state/app-store";
@@ -22,10 +22,34 @@ describe("desktop app pages", () => {
     expect(screen.getByText("Recent Directories")).toBeInTheDocument();
   });
 
-  it("shows workspace context in the rail and snapshot header", () => {
+  it("renders workspace status inside the primary workspace rail", () => {
     render(<App />);
-    expect(screen.getByText(/observer-first desktop console/i)).toBeInTheDocument();
-    expect(screen.getByText(/fresh snapshot/i)).toBeInTheDocument();
+    const workspaceRail = screen.getByRole("complementary", { name: /primary workspace/i });
+
+    expect(within(workspaceRail).getByRole("heading", { level: 1, name: /observer-first desktop console/i })).toBeInTheDocument();
+    expect(within(workspaceRail).getByText("Workspace status")).toBeInTheDocument();
+    expect(within(workspaceRail).getByText(/fresh snapshot/i)).toBeInTheDocument();
+  });
+
+  it("renders the current snapshot header around the workspace path", () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "overview",
+    });
+
+    render(<App />);
+
+    const snapshotHeader = screen.getByRole("banner");
+
+    expect(within(snapshotHeader).getByText("Current snapshot")).toBeInTheDocument();
+    expect(within(snapshotHeader).getByRole("heading", { level: 2, name: "/var/lib/binary-stream/cache-alpha" })).toBeInTheDocument();
+    expect(within(snapshotHeader).getByText("Mode: HealthyObserver")).toBeInTheDocument();
   });
 
   test("renders overview cards after overview data loads", () => {
