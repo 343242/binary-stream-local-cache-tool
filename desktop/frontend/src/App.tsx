@@ -61,7 +61,7 @@ export default function App() {
 
   return (
     <main className={styles.frame}>
-      <Sidebar activePage={page} onNavigate={setPage} />
+      <Sidebar activePage={page} onNavigate={setPage} workspace={workspace} />
       <section className={styles.content}>
         <TopBar workspace={workspace} onRefresh={refresh} workspaceLoadState={workspaceLoadState} />
         <div className={styles.pageStack}>

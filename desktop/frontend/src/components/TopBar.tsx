@@ -15,20 +15,18 @@ export default function TopBar({ workspace, workspaceLoadState, onRefresh }: Top
 
   return (
     <header className={styles.topBar}>
-      <div>
+      <div className={styles.topBarIdentity}>
+        <p className={styles.eyebrow}>Current snapshot</p>
         <h2 className={styles.topBarTitle}>{title}</h2>
         <div className={styles.topBarMeta}>
           <span>Mode: {workspace?.mode ?? "NoWorkspace"}</span>
           <span>Lock: {workspace?.lockMode ?? "N/A"}</span>
           <span>Health: {workspace?.health ?? "N/A"}</span>
-          {isHydrating ? <span>Opening workspace</span> : null}
-          {isRefreshing ? <span>Refresh in progress</span> : null}
         </div>
       </div>
       <div className={styles.badgeRow}>
-        <span className={`${styles.badge} ${workspace?.stale ? styles.staleBadge : ""}`}>
-          {workspace?.stale ? "Data may be stale" : "Fresh snapshot"}
-        </span>
+        {isHydrating ? <span className={styles.badge}>Opening workspace</span> : null}
+        {isRefreshing ? <span className={styles.badge}>Refresh in progress</span> : null}
         <button className={`${styles.secondaryButton} ${styles.focusable}`} disabled={isRefreshing} onClick={onRefresh} type="button">
           {isRefreshing ? "Refreshing..." : "Refresh"}
         </button>

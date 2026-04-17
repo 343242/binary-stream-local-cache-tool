@@ -22,6 +22,12 @@ describe("desktop app pages", () => {
     expect(screen.getByText("Recent Directories")).toBeInTheDocument();
   });
 
+  it("shows workspace context in the rail and snapshot header", () => {
+    render(<App />);
+    expect(screen.getByText(/observer-first desktop console/i)).toBeInTheDocument();
+    expect(screen.getByText(/fresh snapshot/i)).toBeInTheDocument();
+  });
+
   test("renders overview cards after overview data loads", () => {
     resetStore({
       workspace: {

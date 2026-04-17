@@ -20,8 +20,17 @@
   box-shadow: var(--shadow-card);
 }
 
-.brand {
+.brandBlock {
   margin: 0 0 var(--space-8);
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .brandName {
@@ -30,10 +39,20 @@
   font-weight: 700;
 }
 
-.brandMeta {
-  margin: var(--space-3) 0 0;
+.workspaceRailSummary {
+  display: grid;
+  gap: var(--space-2, 8px);
+  margin: 0 0 var(--space-8);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.summaryLabel {
   color: var(--text-secondary);
-  font-size: 0.92rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .navList {
@@ -80,6 +99,11 @@
   padding: var(--space-3) var(--space-4);
 }
 
+.topBarIdentity {
+  display: grid;
+  gap: var(--space-2, 8px);
+}
+
 .topBarMeta {
   display: flex;
   flex-wrap: wrap;
@@ -89,8 +113,8 @@
 }
 
 .topBarTitle {
-  margin: 0 0 6px;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 1.1rem;
 }
 
 .badgeRow {
