@@ -23,7 +23,7 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
   return (
     <section className={`${styles.panel} ${styles.hero}`}>
       <p className={styles.eyebrow}>Landing</p>
-      <h2 className={styles.heroTitle}>Open one cache root with enough context for routine checks and enough guardrails for maintenance windows.</h2>
+      <h2 className={styles.heroTitle}>Open one cache root and move into inspection with context already in frame.</h2>
       <p className={styles.heroCopy}>
         Phase-1 desktop console for cache inspection, replay diagnostics, and guarded operations. Start in observer mode,
         keep the shell readable for routine checks, and escalate deliberately only when the shell calls for operator handoff.
@@ -36,7 +36,7 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
       <section className={styles.pageStack}>
         <div className={styles.sectionHeader}>
           <div className={styles.pageStack}>
-            <p className={styles.eyebrow}>Recent activity</p>
+            <p className={styles.eyebrow}>Recent workspaces</p>
             <h3 className={styles.sectionTitle}>Recent Directories</h3>
           </div>
         </div>

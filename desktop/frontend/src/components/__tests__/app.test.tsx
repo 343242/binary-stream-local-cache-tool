@@ -70,9 +70,20 @@ describe("desktop app pages", () => {
   });
 
   it("renders overview as a narrative page with warnings and activity regions", () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "overview",
+    });
+
     render(<App />);
-    expect(screen.getByText(/maintenance windows/i)).toBeInTheDocument();
-    expect(screen.getByText(/recent activity/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Maintenance windows$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Recent activity$/i)).toBeInTheDocument();
   });
 
   test("shows no segments empty state when explorer has zero rows", () => {
