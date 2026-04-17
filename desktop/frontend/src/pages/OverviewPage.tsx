@@ -44,6 +44,7 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
         ) : (
           <EmptyState
             eyebrow="Maintenance windows"
+            variant="inline"
             title="No active warnings"
             message="The current workspace is readable without escalations or pending repair cues."
           />

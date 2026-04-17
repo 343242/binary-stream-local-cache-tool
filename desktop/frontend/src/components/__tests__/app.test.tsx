@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import App from "../../App";
+import EmptyState from "../EmptyState";
+import LoadingSkeleton from "../LoadingSkeleton";
+import StatusCard from "../StatusCard";
 import { createInitialState, useAppStore } from "../../state/app-store";
+import styles from "../../styles/shell.module.css";
 
 function resetStore(partial?: Partial<ReturnType<typeof createInitialState>>) {
   useAppStore.setState({
@@ -69,7 +73,7 @@ describe("desktop app pages", () => {
     expect(screen.getByText("Recent Segments")).toBeInTheDocument();
   });
 
-  it("renders overview as a narrative page with warnings and activity regions", () => {
+  it("renders overview as a narrative page with approved hero, warnings, and activity regions", () => {
     resetStore({
       workspace: {
         rootPath: "/var/lib/binary-stream/cache-alpha",
@@ -82,6 +86,12 @@ describe("desktop app pages", () => {
     });
 
     render(<App />);
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: /readable enough for routine checks\. severe enough for maintenance windows\./i,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/^Maintenance windows$/i)).toBeInTheDocument();
     expect(screen.getByText(/^Recent activity$/i)).toBeInTheDocument();
   });
@@ -199,5 +209,49 @@ describe("desktop app pages", () => {
     render(<App />);
     fireEvent.click(screen.getByText("48"));
     await waitFor(() => expect(getSegmentDetail).toHaveBeenCalledWith(48));
+  });
+});
+
+describe("editorial component boundaries", () => {
+  test("renders empty state chrome only for panel usage", () => {
+    const { container, rerender } = render(<EmptyState title="No warnings" message="Inline copy" variant="inline" />);
+
+    const inlineRoot = container.querySelector("section");
+    expect(inlineRoot).not.toHaveClass(styles.panel);
+    expect(inlineRoot).not.toHaveClass(styles.panelPadding);
+
+    rerender(<EmptyState title="No warnings" message="Panel copy" variant="panel" />);
+
+    const panelRoot = container.querySelector("section");
+    expect(panelRoot).toHaveClass(styles.panel);
+    expect(panelRoot).toHaveClass(styles.panelPadding);
+  });
+
+  test("supports loading skeleton width presets through variants", () => {
+    const { container, rerender } = render(<LoadingSkeleton rows={3} />);
+
+    const defaultWidths = Array.from(container.querySelectorAll(`.${styles.skeleton}`)).map(
+      (row) => (row as HTMLElement).style.width,
+    );
+    expect(defaultWidths).toEqual(["100%", "88%", "72%"]);
+
+    rerender(<LoadingSkeleton rows={3} variant="compact" />);
+
+    const compactWidths = Array.from(container.querySelectorAll(`.${styles.skeleton}`)).map(
+      (row) => (row as HTMLElement).style.width,
+    );
+    expect(compactWidths).toEqual(["72%", "64%", "56%"]);
+  });
+
+  test("renders status-card eyebrow only when provided", () => {
+    render(
+      <>
+        <StatusCard label="Workspace" value="HealthyObserver" secondary="Observer mode" />
+        <StatusCard eyebrow="Overview" label="Warnings" value="1 warning" secondary="Backlog estimate unavailable" />
+      </>,
+    );
+
+    expect(screen.queryByText("Inspection")).not.toBeInTheDocument();
+    expect(screen.getByText("Overview")).toBeInTheDocument();
   });
 });

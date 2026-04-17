@@ -4,13 +4,26 @@ type EmptyStateProps = {
   title: string;
   message: string;
   eyebrow?: string;
+  variant?: "panel" | "inline";
   actionLabel?: string;
   onAction?: () => void;
 };
 
-export default function EmptyState({ title, message, eyebrow = "Inspection note", actionLabel, onAction }: EmptyStateProps) {
+export default function EmptyState({
+  title,
+  message,
+  eyebrow = "Inspection note",
+  variant = "panel",
+  actionLabel,
+  onAction,
+}: EmptyStateProps) {
+  const containerClassName =
+    variant === "panel"
+      ? `${styles.panel} ${styles.panelPadding} ${styles.emptyState}`
+      : styles.emptyState;
+
   return (
-    <section className={`${styles.panel} ${styles.panelPadding} ${styles.emptyState}`}>
+    <section className={containerClassName}>
       <p className={styles.eyebrow}>{eyebrow}</p>
       <h3 className={styles.emptyTitle}>{title}</h3>
       <p className={styles.emptyCopy}>{message}</p>
