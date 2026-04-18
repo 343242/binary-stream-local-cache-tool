@@ -12,6 +12,7 @@ import {
   type WALDetailVM,
   type WorkspaceState as BoundWorkspaceState,
 } from "../bindings";
+import { defaultLocale, formatMessage, getMessages, localizeConfigField, localizeConfigNote, localizeConfigSection, nextLocale, type LocaleKey } from "../i18n";
 import { hasRuntime, subscribeToEvent } from "../runtime";
 
 export type PageKey = "overview" | "explorer" | "config" | "operations";
@@ -29,7 +30,7 @@ export type WorkspaceState = {
 };
 
 export type OverviewCard = {
-  label: string;
+  key: "workspace" | "lock" | "footprint" | "replay" | "checkpoint" | "warnings";
   value: string;
   secondary: string;
   tier?: "default" | "hero";
@@ -105,6 +106,7 @@ export type ConfirmDialogState = {
 
 type ShellState = {
   title: string;
+  locale: LocaleKey;
   page: PageKey;
   explorerTab: ExplorerTab;
   workspaceLoadState: WorkspaceLoadState;
@@ -130,6 +132,7 @@ type ShellState = {
   confirmDialog: ConfirmDialogState | null;
   nextToastID: number;
   setTitle: (title: string) => void;
+  setLocale: (locale: LocaleKey) => void;
   setPage: (page: PageKey) => void;
   setExplorerTab: (tab: ExplorerTab) => void;
   setSelectedSegment: (segment: SegmentRow) => void;
@@ -146,15 +149,6 @@ type ShellState = {
   dismissToast: (id: number) => void;
   initialiseRuntime: () => void;
 };
-
-const demoOverviewCards: OverviewCard[] = [
-  { label: "Workspace", value: "HealthyObserver", secondary: "Local cache root is readable" },
-  { label: "Lock State", value: "ObserverShared", secondary: "Maintenance actions remain gated" },
-  { label: "Storage Footprint", value: "48 segments", secondary: "Active segment 000048 · 128 MiB" },
-  { label: "Replay Progress", value: "12,441", secondary: "Last acked write sequence" },
-  { label: "Checkpoint / Fsync", value: "96 / 311", secondary: "Checkpoint total / segment fsync total" },
-  { label: "Warnings", value: "1 warning", secondary: "Backlog estimate unavailable in demo mode" },
-];
 
 const demoSegments: SegmentRow[] = [
   {
@@ -188,27 +182,6 @@ const demoCursors: CursorRow[] = [
   { destination: "warehouse", writeSeq: 12388, updatedAt: "2026-04-15 14:14", status: "lagging" },
 ];
 
-const demoConfigSections: Record<string, ConfigRow[]> = {
-  Segment: [
-    { field: "Segment Target Size", effective: "134217728", defaultValue: "134217728", allowedRange: "64 MiB to 4 GiB", note: "Startup-only" },
-    { field: "Segment Slack Size", effective: "4194304", defaultValue: "4194304", allowedRange: "1 MiB to 64 MiB", note: "Startup-only" },
-  ],
-  Block: [
-    { field: "Block Target Size", effective: "1048576", defaultValue: "1048576", allowedRange: "256 KiB to 4 MiB", note: "Startup-only" },
-  ],
-  Checkpoint: [
-    { field: "Checkpoint Interval", effective: "5s", defaultValue: "5s", allowedRange: "1s to 60s", note: "Startup-only" },
-    { field: "Checkpoint Bytes", effective: "67108864", defaultValue: "67108864", allowedRange: "4 MiB to 1 GiB", note: "Startup-only" },
-  ],
-  Fsync: [
-    { field: "Segment Fsync Interval", effective: "250ms", defaultValue: "250ms", allowedRange: "10ms to 5s", note: "Startup-only" },
-    { field: "Segment Fsync Bytes", effective: "8388608", defaultValue: "8388608", allowedRange: "1 MiB to 64 MiB", note: "Startup-only" },
-  ],
-  Retention: [
-    { field: "Retention Days", effective: "14", defaultValue: "14", allowedRange: "1 to 365", note: "Startup-only" },
-  ],
-};
-
 export const createInitialState = (): Omit<
   ShellState,
   | "setTitle"
@@ -226,9 +199,11 @@ export const createInitialState = (): Omit<
   | "openRepairFromResult"
   | "cancelCurrentTask"
   | "dismissToast"
+  | "setLocale"
   | "initialiseRuntime"
 > => ({
-  title: "Binary Stream Cache Tool",
+  title: getMessages(defaultLocale).brand.product,
+  locale: defaultLocale,
   page: "overview",
   explorerTab: "segments",
   workspaceLoadState: "idle",
@@ -237,8 +212,8 @@ export const createInitialState = (): Omit<
     "/var/lib/binary-stream/cache-alpha",
     "/srv/cache/replica-west",
   ],
-  overviewCards: demoOverviewCards,
-  warningSummary: ["Backlog estimate unavailable in demo mode."],
+  overviewCards: createDemoOverviewCards(defaultLocale),
+  warningSummary: [createDemoWarning(defaultLocale)],
   recentSegments: demoSegments,
   recentCursors: demoCursors,
   selectedSegment: null,
@@ -249,7 +224,7 @@ export const createInitialState = (): Omit<
   checkpointDetail: null,
   explorerDetailLoading: false,
   explorerDetailError: null,
-  configSections: demoConfigSections,
+  configSections: createDemoConfigSections(defaultLocale),
   selectedOperation: "verify",
   latestResult: null,
   currentTask: null,
@@ -261,7 +236,42 @@ export const createInitialState = (): Omit<
 export const useAppStore = create<ShellState>((set, get) => ({
   ...createInitialState(),
   setTitle: (title) => set({ title }),
-  setPage: (page) => set({ page }),
+  setLocale: (locale) => {
+    set({ locale, title: getMessages(locale).brand.product });
+    const workspace = get().workspace;
+    if (hasBindings() && workspace?.rootPath && workspace.mode !== "InvalidWorkspace") {
+      void hydrateFromBindings(workspace.rootPath, set, "refreshing");
+      return;
+    }
+    if (!hasBindings()) {
+      set({
+        overviewCards: createDemoOverviewCards(locale),
+        warningSummary: [createDemoWarning(locale)],
+        configSections: createDemoConfigSections(locale),
+      });
+    }
+  },
+  setPage: (page) => {
+    if (!canAccessPage(get(), page)) {
+      const locale = get().locale;
+      const m = getMessages(locale);
+      set((state) => ({
+        toasts: [
+          ...state.toasts,
+          {
+            id: state.nextToastID,
+            level: "warning",
+            title: m.common.openWorkspaceFirst,
+            message: m.common.openWorkspaceFirstDetail,
+            durationLabel: m.common.duration4s,
+          },
+        ],
+        nextToastID: state.nextToastID + 1,
+      }));
+      return;
+    }
+    set({ page });
+  },
   setExplorerTab: (tab) => {
     set({
       explorerTab: tab,
@@ -309,6 +319,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
       }
       return;
     }
+    const locale = get().locale;
     set({
       workspaceLoadState: "idle",
       workspace: {
@@ -318,6 +329,9 @@ export const useAppStore = create<ShellState>((set, get) => ({
         health: "ok",
         stale: false,
       },
+      overviewCards: createDemoOverviewCards(locale),
+      warningSummary: [createDemoWarning(locale)],
+      configSections: createDemoConfigSections(locale),
     });
   },
   markInvalidWorkspace: (path, reason) =>
@@ -347,27 +361,31 @@ export const useAppStore = create<ShellState>((set, get) => ({
     }));
   },
   requestOperation: (operation) => {
+    const locale = get().locale;
+    const m = getMessages(locale);
     if (operation === "repair-tail" || operation === "shutdown") {
       const selectedSegmentID = get().selectedSegment?.segmentID;
       set({
         confirmDialog: {
           operation,
-          title: operation === "repair-tail" ? "Repair-tail" : "Shutdown",
+          title: localizeOperationTitle(locale, operation),
           riskLevel: "danger",
           summary:
             operation === "repair-tail"
-              ? "This action is still blocked until you review the maintenance impact."
-              : "This action is still blocked until you review the shutdown impact.",
+              ? m.operations.blockedMaintenance
+              : m.operations.blockedMaintenance,
           impactLines:
             operation === "repair-tail"
               ? [
-                  "Requires MaintenanceExclusive lock",
-                  "May rewrite a truncated segment tail",
-                  selectedSegmentID ? `Selected segment ${selectedSegmentID}` : "Selected segment unavailable",
+                  m.operations.blockedMaintenance,
+                  m.operations.impactLines.repairTail1,
+                  selectedSegmentID
+                    ? formatMessage(m.operations.impactLines.repairTailWithSegment, { segmentID: selectedSegmentID })
+                    : m.operations.impactLines.repairTailWithoutSegment,
                 ]
-              : ["Requires MaintenanceExclusive lock", "Cannot be cancelled after confirmation", "Selected operation affects the whole workspace"],
-          confirmLabel: operation === "repair-tail" ? "Authorize Repair Tail" : "Authorize Shutdown",
-          cancelLabel: "Cancel",
+              : [m.operations.blockedMaintenance, m.operations.impactLines.shutdown1, m.operations.impactLines.shutdown3],
+          confirmLabel: operation === "repair-tail" ? `${m.operations.runPrefix} ${m.operations.operationTitles.repairTail}` : `${m.operations.runPrefix} ${m.operations.operationTitles.shutdown}`,
+          cancelLabel: m.common.dismiss,
         },
       });
       return;
@@ -412,9 +430,9 @@ export const useAppStore = create<ShellState>((set, get) => ({
         {
           id: state.nextToastID,
           level: "info",
-          title: `${task.kind} cancelled`,
-          message: "Task cancelled from the desktop shell.",
-          durationLabel: "4s",
+          title: `${localizeOperationTitle(state.locale, task.kind)} ${getMessages(state.locale).task.cancelled}`,
+          message: getMessages(state.locale).task.cancelTask,
+          durationLabel: getMessages(state.locale).common.duration4s,
         },
       ],
       nextToastID: state.nextToastID + 1,
@@ -472,12 +490,13 @@ export const useAppStore = create<ShellState>((set, get) => ({
           }
           const mappedTask = mapTask(task as Record<string, unknown>);
           const result = mapTaskResult(task as Record<string, unknown>);
+          const locale = get().locale;
           set((state) => ({
             currentTask: mappedTask,
             latestResult: result ?? state.latestResult,
             toasts: [
               ...state.toasts,
-              makeToastFromTask(mappedTask, result, state.nextToastID),
+              makeToastFromTask(locale, mappedTask, result, state.nextToastID),
             ],
             nextToastID: state.nextToastID + 1,
           }));
@@ -525,7 +544,7 @@ async function hydrateFromBindings(
 
     set({
       workspace: mapWorkspaceState(workspace, overview.isStale),
-      overviewCards: mapOverviewCards(overview),
+      overviewCards: mapOverviewCards(overview, useAppStore.getState().locale),
       warningSummary: overview.warnings.map((warning) => warning.message),
       recentSegments: mapSegments(segments),
       recentCursors: cursors.map((cursor) => ({
@@ -534,7 +553,7 @@ async function hydrateFromBindings(
         updatedAt: formatTimestamp(cursor.updatedAt),
         status: cursor.status,
       })),
-      configSections: mapConfigSections(config),
+      configSections: mapConfigSections(useAppStore.getState().locale, config),
       selectedSegment: null,
       selectedCursor: null,
       workspaceLoadState: "idle",
@@ -548,7 +567,7 @@ async function hydrateFromBindings(
         lockMode: "N/A",
         health: "degraded",
         stale: true,
-        invalidReason: "Backend binding failed; showing fallback shell state.",
+        invalidReason: getMessages(useAppStore.getState().locale).common.openWorkspaceFirstDetail,
       },
     });
   }
@@ -612,7 +631,7 @@ async function loadExplorerTabDetail(
   } catch {
     set({
       explorerDetailLoading: false,
-      explorerDetailError: "Detail data could not be loaded for the selected tab.",
+      explorerDetailError: getMessages(useAppStore.getState().locale).common.openWorkspaceFirstDetail,
       walDetail: tab === "wal" ? null : get().walDetail,
       checkpointDetail: tab === "checkpoint" ? null : get().checkpointDetail,
     });
@@ -639,7 +658,7 @@ async function loadSegmentDetail(segment: SegmentRow, set: typeof useAppStore.se
     set({
       segmentDetail: null,
       explorerDetailLoading: false,
-      explorerDetailError: "Segment detail could not be loaded.",
+      explorerDetailError: getMessages(useAppStore.getState().locale).common.openWorkspaceFirstDetail,
     });
   }
 }
@@ -664,7 +683,7 @@ async function loadCursorDetail(cursor: CursorRow, set: typeof useAppStore.setSt
     set({
       cursorDetail: null,
       explorerDetailLoading: false,
-      explorerDetailError: "Cursor detail could not be loaded.",
+      explorerDetailError: getMessages(useAppStore.getState().locale).common.openWorkspaceFirstDetail,
     });
   }
 }
@@ -680,14 +699,15 @@ function mapWorkspaceState(workspace: BoundWorkspaceState, stale = false): Works
   };
 }
 
-function mapOverviewCards(overview: OverviewVM): OverviewCard[] {
+function mapOverviewCards(overview: OverviewVM, locale: LocaleKey): OverviewCard[] {
+  const m = getMessages(locale);
   return [
-    { label: "Workspace", value: overview.workspaceMode, secondary: overview.rootPath, tier: "hero" },
-    { label: "Lock State", value: overview.lockMode, secondary: overview.health },
-    { label: "Storage Footprint", value: `${overview.segmentCount} segments`, secondary: `Active segment ${overview.activeSegmentID}` },
-    { label: "Replay Progress", value: `${overview.lastAckedWriteSeq}`, secondary: `Next write seq ${overview.nextWriteSeq}` },
-    { label: "Checkpoint / Fsync", value: `${overview.checkpointsTotal} / ${overview.segmentFsyncTotal}`, secondary: `Retention ${overview.retentionDays} days` },
-    { label: "Warnings", value: `${overview.warnings.length} warning(s)`, secondary: overview.warnings[0]?.message ?? "No warnings" },
+    { key: "workspace", value: overview.workspaceMode, secondary: overview.rootPath, tier: "hero" },
+    { key: "lock", value: overview.lockMode, secondary: overview.health },
+    { key: "footprint", value: locale === "zh-CN" ? `${overview.segmentCount} 段` : `${overview.segmentCount} segments`, secondary: locale === "zh-CN" ? `活动段 ${overview.activeSegmentID}` : `Active segment ${overview.activeSegmentID}` },
+    { key: "replay", value: `${overview.lastAckedWriteSeq}`, secondary: locale === "zh-CN" ? `下一写入序号 ${overview.nextWriteSeq}` : `Next write seq ${overview.nextWriteSeq}` },
+    { key: "checkpoint", value: `${overview.checkpointsTotal} / ${overview.segmentFsyncTotal}`, secondary: locale === "zh-CN" ? `保留 ${overview.retentionDays} 天` : `Retention ${overview.retentionDays} days` },
+    { key: "warnings", value: locale === "zh-CN" ? `${overview.warnings.length} 条告警` : `${overview.warnings.length} warning(s)`, secondary: overview.warnings[0]?.message ?? m.overview.noWarningsTitle },
   ];
 }
 
@@ -706,32 +726,32 @@ function mapSegments(segments: PagedSegmentsVM): SegmentRow[] {
   }));
 }
 
-function mapConfigSections(config: ConfigVM): Record<string, ConfigRow[]> {
+function mapConfigSections(locale: LocaleKey, config: ConfigVM): Record<string, ConfigRow[]> {
   return {
-    Segment: [
-      mapConfigField(config.segmentTargetSizeBytes),
-      mapConfigField(config.segmentSlackSizeBytes),
+    [localizeConfigSection(locale, "Segment")]: [
+      mapConfigField(locale, config.segmentTargetSizeBytes),
+      mapConfigField(locale, config.segmentSlackSizeBytes),
     ],
-    Block: [mapConfigField(config.blockTargetSizeBytes)],
-    Checkpoint: [
-      mapConfigField(config.checkpointInterval),
-      mapConfigField(config.checkpointBytes),
+    [localizeConfigSection(locale, "Block")]: [mapConfigField(locale, config.blockTargetSizeBytes)],
+    [localizeConfigSection(locale, "Checkpoint")]: [
+      mapConfigField(locale, config.checkpointInterval),
+      mapConfigField(locale, config.checkpointBytes),
     ],
-    Fsync: [
-      mapConfigField(config.segmentFsyncInterval),
-      mapConfigField(config.segmentFsyncBytes),
+    [localizeConfigSection(locale, "Fsync")]: [
+      mapConfigField(locale, config.segmentFsyncInterval),
+      mapConfigField(locale, config.segmentFsyncBytes),
     ],
-    Retention: [mapConfigField(config.retentionDays)],
+    [localizeConfigSection(locale, "Retention")]: [mapConfigField(locale, config.retentionDays)],
   };
 }
 
-function mapConfigField(field: ConfigVM[keyof ConfigVM]): ConfigRow {
+function mapConfigField(locale: LocaleKey, field: ConfigVM[keyof ConfigVM]): ConfigRow {
   return {
-    field: field.displayName,
+    field: localizeConfigField(locale, field.displayName),
     effective: field.currentValue,
     defaultValue: field.defaultValue,
     allowedRange: field.allowedRange,
-    note: field.startupOnly ? "Startup-only" : "Mutable",
+    note: localizeConfigNote(locale, field.startupOnly ? "Startup-only" : "Mutable"),
   };
 }
 
@@ -759,7 +779,7 @@ function buildFallbackSegmentDetail(segment: SegmentRow): SegmentDetailVM {
     minEventTime: Number.isFinite(minEventTime) ? minEventTime : 0,
     maxEventTime: Number.isFinite(maxEventTime) ? maxEventTime : 0,
     lastBatchSeq: segment.lastBatchSeq,
-    rawPreviewHex: "Preview capped to first 64 KiB",
+    rawPreviewHex: useAppStore.getState().locale === "zh-CN" ? "预览仅保留前 64 KiB" : "Preview capped to first 64 KiB",
     structuredPreview: [
       { key: "Health", value: segment.health },
       { key: "Write Seq Range", value: `${segment.firstWriteSeq} - ${segment.lastWriteSeq}` },
@@ -785,6 +805,8 @@ function startOperation(operation: OperationKey, set: typeof useAppStore.setStat
   if (operationBlocked(operation, get())) {
     return;
   }
+  const locale = get().locale;
+  const m = getMessages(locale);
   if (hasBindings()) {
     void startBoundOperation(operation, set, get);
     return;
@@ -799,7 +821,7 @@ function startOperation(operation: OperationKey, set: typeof useAppStore.setStat
       status: "running",
       target: "",
       phase: "starting",
-      message: "Preparing operation",
+      message: locale === "zh-CN" ? "正在准备操作" : "Preparing operation",
       startedAt: formatTimestamp(Date.now()),
       updatedAt: formatTimestamp(Date.now()),
       progressCurrent: 1,
@@ -810,7 +832,7 @@ function startOperation(operation: OperationKey, set: typeof useAppStore.setStat
   });
 
   window.setTimeout(() => {
-    const finish = finishOperation(operation, nextToastID);
+    const finish = finishOperation(locale, operation, nextToastID);
     set((state) => ({
       latestResult: finish.result,
       currentTask: {
@@ -862,6 +884,7 @@ async function startBoundOperation(operation: OperationKey, set: typeof useAppSt
       }
     }
   } catch {
+    const locale = get().locale;
     set({
       currentTask: {
         taskID: `ui-${Date.now()}`,
@@ -869,13 +892,13 @@ async function startBoundOperation(operation: OperationKey, set: typeof useAppSt
         status: "failed",
         target: "",
         phase: "finished",
-        message: "Backend operation failed to start.",
+        message: locale === "zh-CN" ? "后端操作启动失败。" : "Backend operation failed to start.",
         startedAt: formatTimestamp(Date.now()),
         updatedAt: formatTimestamp(Date.now()),
         progressCurrent: null,
         progressTotal: null,
         canCancel: false,
-        error: "Backend operation failed to start.",
+        error: locale === "zh-CN" ? "后端操作启动失败。" : "Backend operation failed to start.",
       },
     });
   }
@@ -898,76 +921,78 @@ function operationBlocked(operation: OperationKey, state: ShellState) {
 }
 
 function finishOperation(
+  locale: LocaleKey,
   operation: OperationKey,
   toastID: number,
 ): { status: "succeeded" | "failed"; result: OperationResultState; toast: ToastState } {
+  const m = getMessages(locale);
   switch (operation) {
     case "verify":
       return {
         status: "succeeded",
         result: {
-          summary: "Repairable corruption detected during verify.",
+          summary: locale === "zh-CN" ? "校验发现可修复损坏。" : "Repairable corruption detected during verify.",
           changed: false,
           repairableSegment: 48,
           details: [
-            { key: "segment", value: "48" },
-            { key: "recommendation", value: "Open Repair" },
+            { key: locale === "zh-CN" ? "段文件" : "segment", value: "48" },
+            { key: locale === "zh-CN" ? "建议" : "recommendation", value: m.operations.openRepair },
           ],
         },
         toast: {
           id: toastID,
           level: "warning",
-          title: "Verify completed",
-          message: "Repairable corruption found in segment 48.",
-          durationLabel: "6s",
+          title: locale === "zh-CN" ? "校验完成" : "Verify completed",
+          message: locale === "zh-CN" ? "在段文件 48 中发现可修复损坏。" : "Repairable corruption found in segment 48.",
+          durationLabel: m.common.duration6s,
         },
       };
     case "close-check":
       return {
         status: "succeeded",
         result: {
-          summary: "Close-check completed successfully.",
+          summary: locale === "zh-CN" ? "关闭检查已成功完成。" : "Close-check completed successfully.",
           changed: false,
-          details: [{ key: "lifecycle", value: "clean" }],
+          details: [{ key: locale === "zh-CN" ? "生命周期" : "lifecycle", value: locale === "zh-CN" ? "干净" : "clean" }],
         },
         toast: {
           id: toastID,
           level: "success",
-          title: "Close-check completed",
-          message: "Lifecycle state is clean.",
-          durationLabel: "4s",
+          title: locale === "zh-CN" ? "关闭检查完成" : "Close-check completed",
+          message: locale === "zh-CN" ? "生命周期状态正常。" : "Lifecycle state is clean.",
+          durationLabel: m.common.duration4s,
         },
       };
     case "repair-tail":
       return {
         status: "succeeded",
         result: {
-          summary: "Repair-tail finished for segment 48.",
+          summary: locale === "zh-CN" ? "段文件 48 的尾部修复已完成。" : "Repair-tail finished for segment 48.",
           changed: true,
-          details: [{ key: "segment", value: "48" }],
+          details: [{ key: locale === "zh-CN" ? "段文件" : "segment", value: "48" }],
         },
         toast: {
           id: toastID,
           level: "success",
-          title: "Repair-tail completed",
-          message: "Segment 48 tail was repaired.",
-          durationLabel: "4s",
+          title: locale === "zh-CN" ? "尾部修复完成" : "Repair-tail completed",
+          message: locale === "zh-CN" ? "段文件 48 的尾部已经修复。" : "Segment 48 tail was repaired.",
+          durationLabel: m.common.duration4s,
         },
       };
     case "shutdown":
       return {
         status: "failed",
         result: {
-          summary: "Shutdown requires explicit handoff and remains blocked in this demo shell.",
+          summary: locale === "zh-CN" ? "停机仍需显式交接，在当前演示壳层中保持阻止。" : "Shutdown requires explicit handoff and remains blocked in this demo shell.",
           changed: false,
-          details: [{ key: "state", value: "blocked" }],
+          details: [{ key: locale === "zh-CN" ? "状态" : "state", value: locale === "zh-CN" ? "已阻止" : "blocked" }],
         },
         toast: {
           id: toastID,
           level: "error",
-          title: "Shutdown blocked",
-          message: "Manual acknowledgement is still required.",
-          durationLabel: "persistent",
+          title: locale === "zh-CN" ? "停机被阻止" : "Shutdown blocked",
+          message: locale === "zh-CN" ? "仍然需要人工确认。" : "Manual acknowledgement is still required.",
+          durationLabel: m.common.durationPersistent,
         },
       };
   }
@@ -1008,7 +1033,8 @@ function mapTaskResult(task: Record<string, unknown>): OperationResultState | nu
   };
 }
 
-function makeToastFromTask(task: TaskState, result: OperationResultState | null, id: number): ToastState {
+function makeToastFromTask(locale: LocaleKey, task: TaskState, result: OperationResultState | null, id: number): ToastState {
+  const m = getMessages(locale);
   const level =
     task.status === "failed" ? "error" :
     result?.changed ? "success" :
@@ -1016,10 +1042,83 @@ function makeToastFromTask(task: TaskState, result: OperationResultState | null,
   return {
     id,
     level,
-    title: `${task.kind} ${task.status}`,
-    message: result?.summary || task.error || task.message || "Task update received.",
-    durationLabel: level === "error" ? "persistent" : "4s",
+    title: `${localizeOperationTitle(locale, task.kind)} ${localizeTaskStatus(locale, task.status)}`,
+    message: result?.summary || task.error || task.message || (locale === "zh-CN" ? "收到任务更新。" : "Task update received."),
+    durationLabel: level === "error" ? m.common.durationPersistent : m.common.duration4s,
   };
+}
+
+function createDemoOverviewCards(locale: LocaleKey): OverviewCard[] {
+  return [
+    { key: "workspace", value: "HealthyObserver", secondary: locale === "zh-CN" ? "本地缓存根目录可读" : "Local cache root is readable", tier: "hero" },
+    { key: "lock", value: "ObserverShared", secondary: locale === "zh-CN" ? "维护动作仍受门禁限制" : "Maintenance actions remain gated" },
+    { key: "footprint", value: locale === "zh-CN" ? "48 段" : "48 segments", secondary: locale === "zh-CN" ? "活动段 000048 · 128 MiB" : "Active segment 000048 · 128 MiB" },
+    { key: "replay", value: "12,441", secondary: locale === "zh-CN" ? "最后确认写入序号" : "Last acked write sequence" },
+    { key: "checkpoint", value: "96 / 311", secondary: locale === "zh-CN" ? "检查点总数 / 段文件 fsync 总数" : "Checkpoint total / segment fsync total" },
+    { key: "warnings", value: locale === "zh-CN" ? "1 条告警" : "1 warning", secondary: createDemoWarning(locale) },
+  ];
+}
+
+function createDemoWarning(locale: LocaleKey) {
+  return locale === "zh-CN" ? "演示模式下无法估算积压。" : "Backlog estimate unavailable in demo mode.";
+}
+
+function createDemoConfigSections(locale: LocaleKey): Record<string, ConfigRow[]> {
+  return {
+    [localizeConfigSection(locale, "Segment")]: [
+      { field: localizeConfigField(locale, "Segment Target Size"), effective: "134217728", defaultValue: "134217728", allowedRange: "64 MiB to 4 GiB", note: localizeConfigNote(locale, "Startup-only") },
+      { field: localizeConfigField(locale, "Segment Slack Size"), effective: "4194304", defaultValue: "4194304", allowedRange: "1 MiB to 64 MiB", note: localizeConfigNote(locale, "Startup-only") },
+    ],
+    [localizeConfigSection(locale, "Block")]: [
+      { field: localizeConfigField(locale, "Block Target Size"), effective: "1048576", defaultValue: "1048576", allowedRange: "256 KiB to 4 MiB", note: localizeConfigNote(locale, "Startup-only") },
+    ],
+    [localizeConfigSection(locale, "Checkpoint")]: [
+      { field: localizeConfigField(locale, "Checkpoint Interval"), effective: "5s", defaultValue: "5s", allowedRange: "1s to 60s", note: localizeConfigNote(locale, "Startup-only") },
+      { field: localizeConfigField(locale, "Checkpoint Bytes"), effective: "67108864", defaultValue: "67108864", allowedRange: "4 MiB to 1 GiB", note: localizeConfigNote(locale, "Startup-only") },
+    ],
+    [localizeConfigSection(locale, "Fsync")]: [
+      { field: localizeConfigField(locale, "Segment Fsync Interval"), effective: "250ms", defaultValue: "250ms", allowedRange: "10ms to 5s", note: localizeConfigNote(locale, "Startup-only") },
+      { field: localizeConfigField(locale, "Segment Fsync Bytes"), effective: "8388608", defaultValue: "8388608", allowedRange: "1 MiB to 64 MiB", note: localizeConfigNote(locale, "Startup-only") },
+    ],
+    [localizeConfigSection(locale, "Retention")]: [
+      { field: localizeConfigField(locale, "Retention Days"), effective: "14", defaultValue: "14", allowedRange: "1 to 365", note: localizeConfigNote(locale, "Startup-only") },
+    ],
+  };
+}
+
+function canAccessPage(state: ShellState, page: PageKey) {
+  if (page === "overview") {
+    return true;
+  }
+  return Boolean(state.workspace && state.workspace.mode !== "InvalidWorkspace");
+}
+
+export function localizeOperationTitle(locale: LocaleKey, operation: OperationKey) {
+  const titles = getMessages(locale).operations.operationTitles;
+  switch (operation) {
+    case "verify":
+      return titles.verify;
+    case "close-check":
+      return titles.closeCheck;
+    case "repair-tail":
+      return titles.repairTail;
+    case "shutdown":
+      return titles.shutdown;
+  }
+}
+
+function localizeTaskStatus(locale: LocaleKey, status: TaskState["status"]) {
+  const task = getMessages(locale).task;
+  switch (status) {
+    case "running":
+      return task.inProgress;
+    case "succeeded":
+      return task.completed;
+    case "failed":
+      return task.failed;
+    case "cancelled":
+      return task.cancelled;
+  }
 }
 
 function pickPayload(payload: unknown) {

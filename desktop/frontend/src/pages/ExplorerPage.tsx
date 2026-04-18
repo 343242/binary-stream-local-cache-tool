@@ -1,5 +1,7 @@
 import DetailPane from "../components/DetailPane";
 import EmptyState from "../components/EmptyState";
+import { getMessages, localizeHealth } from "../i18n";
+import { useAppStore } from "../state/app-store";
 import styles from "../styles/shell.module.css";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import type { CheckpointDetailVM, CursorDetailVM, SegmentDetailVM, WALDetailVM } from "../bindings";
@@ -22,13 +24,6 @@ type ExplorerPageProps = {
   onSelectCursor: (cursor: CursorRow) => void;
 };
 
-const tabs: { key: ExplorerTab; label: string }[] = [
-  { key: "segments", label: "Segments" },
-  { key: "wal", label: "WAL" },
-  { key: "cursors", label: "Cursors" },
-  { key: "checkpoint", label: "Checkpoint" },
-];
-
 export default function ExplorerPage({
   activeTab,
   onTabChange,
@@ -45,18 +40,26 @@ export default function ExplorerPage({
   onSelectSegment,
   onSelectCursor,
 }: ExplorerPageProps) {
+  const locale = useAppStore((state) => state.locale);
+  const m = getMessages(locale);
+  const tabs: { key: ExplorerTab; label: string }[] = [
+    { key: "segments", label: m.explorer.tabs.segments },
+    { key: "wal", label: m.explorer.tabs.wal },
+    { key: "cursors", label: m.explorer.tabs.cursors },
+    { key: "checkpoint", label: m.explorer.tabs.checkpoint },
+  ];
   return (
     <div className={styles.explorerLayout}>
       <section className={`${styles.panel} ${styles.panelPadding} ${styles.pageStack}`}>
         <div className={styles.sectionHeader}>
           <div className={styles.pageStack}>
-            <p className={styles.eyebrow}>Explorer audit lens</p>
-            <h3 className={styles.sectionTitle}>Row ledger</h3>
-            <p className={styles.emptyCopy}>Switch lenses here, then inspect the selected record in the separate audit surface.</p>
+            <p className={styles.eyebrow}>{m.explorer.eyebrow}</p>
+            <h3 className={styles.sectionTitle}>{m.explorer.title}</h3>
+            <p className={styles.emptyCopy}>{m.explorer.copy}</p>
           </div>
           <div className={styles.badgeRow}>
-            <span className={styles.badge}>Manual refresh</span>
-            <span className={styles.badge}>Read-only rows</span>
+            <span className={styles.badge}>{m.common.manualRefresh}</span>
+            <span className={styles.badge}>{m.common.readonlyRows}</span>
           </div>
         </div>
         <div className={styles.tabRow}>
@@ -72,15 +75,15 @@ export default function ExplorerPage({
           ))}
         </div>
         {activeTab === "segments" && segments.length === 0 ? (
-          <EmptyState title="No Segments Found" message="This workspace does not currently contain any segment rows." />
+          <EmptyState title={m.explorer.empty.noSegmentsTitle} message={m.explorer.empty.noSegmentsCopy} />
         ) : activeTab === "segments" ? (
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Segment</th>
-                <th>Size</th>
-                <th>Last Write Seq</th>
-                <th>Records</th>
+                <th>{m.explorer.tables.segment}</th>
+                <th>{m.explorer.tables.size}</th>
+                <th>{m.explorer.tables.lastWriteSeq}</th>
+                <th>{m.explorer.tables.records}</th>
               </tr>
             </thead>
             <tbody>
@@ -100,23 +103,23 @@ export default function ExplorerPage({
           </table>
         ) : activeTab === "wal" ? (
           <EmptyState
-            title={walDetail ? "WAL Detail Available" : "No WAL Present"}
+            title={walDetail ? m.explorer.empty.walAvailableTitle : m.explorer.empty.noWalTitle}
             message={
               walDetail
-                ? "The active WAL snapshot is loaded in the detail pane."
-                : "The active WAL file is not present in this demo workspace."
+                ? m.explorer.empty.walAvailableCopy
+                : m.explorer.empty.noWalCopy
             }
           />
         ) : activeTab === "cursors" ? (
           cursors.length === 0 ? (
-            <EmptyState title="No Replay Cursors" message="No replay cursor files were found." />
+            <EmptyState title={m.explorer.empty.noCursorsTitle} message={m.explorer.empty.noCursorsCopy} />
           ) : (
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Destination</th>
-                  <th>Write Seq</th>
-                  <th>Status</th>
+                  <th>{m.explorer.tables.destination}</th>
+                  <th>{m.explorer.tables.writeSeq}</th>
+                  <th>{m.explorer.tables.status}</th>
                 </tr>
               </thead>
               <tbody>
@@ -128,7 +131,7 @@ export default function ExplorerPage({
                   >
                     <td>{cursor.destination}</td>
                     <td>{cursor.writeSeq}</td>
-                    <td>{cursor.status}</td>
+                    <td>{localizeHealth(locale, cursor.status)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -136,46 +139,46 @@ export default function ExplorerPage({
           )
         ) : (
           <EmptyState
-            title={checkpointDetail ? "Checkpoint Detail Available" : "No Checkpoint Written Yet"}
+            title={checkpointDetail ? m.explorer.empty.checkpointAvailableTitle : m.explorer.empty.noCheckpointTitle}
             message={
               checkpointDetail
-                ? "Checkpoint metadata is loaded in the detail pane."
-                : "Checkpoint metadata has not been created yet."
+                ? m.explorer.empty.checkpointAvailableCopy
+                : m.explorer.empty.noCheckpointCopy
             }
           />
         )}
 
       </section>
 
-      <DetailPane eyebrow="Detail pane" note={detailPaneNote(activeTab)} title="Inspection notes">
+      <DetailPane eyebrow={m.explorer.detailEyebrow} note={detailPaneNote(locale, activeTab)} title={m.explorer.detailTitle}>
         {detailLoading ? <LoadingSkeleton rows={5} /> : null}
         {!detailLoading && detailError ? <p className={styles.emptyCopy}>{detailError}</p> : null}
         {!detailLoading && !detailError && activeTab === "segments" && !segmentDetail ? (
-          <p className={styles.emptyCopy}>Select a row to inspect detailed fields and raw preview data.</p>
+          <p className={styles.emptyCopy}>{m.explorer.empty.selectSegment}</p>
         ) : null}
         {!detailLoading && !detailError && activeTab === "segments" && segmentDetail ? (
           <div className={styles.pageStack}>
             <ExplorerFieldGroup
-              title="Segment identity"
+              title={m.explorer.groups.segmentIdentity}
               fields={[
-                { label: "Segment ID", value: `${segmentDetail.segmentID}` },
-                { label: "Path", value: segmentDetail.path },
-                { label: "Block Count", value: `${segmentDetail.blockCount}` },
+                { label: m.explorer.fields.segmentId, value: `${segmentDetail.segmentID}` },
+                { label: m.explorer.fields.path, value: segmentDetail.path },
+                { label: m.explorer.fields.blockCount, value: `${segmentDetail.blockCount}` },
               ]}
             />
             <ExplorerFieldGroup
-              title="Write envelope"
+              title={m.explorer.groups.writeEnvelope}
               fields={[
-                { label: "Write Seq Range", value: `${segmentDetail.firstWriteSeq} - ${segmentDetail.lastWriteSeq}` },
-                { label: "Event Time Range", value: `${formatTimestamp(segmentDetail.minEventTime)} - ${formatTimestamp(segmentDetail.maxEventTime)}` },
+                { label: m.explorer.fields.writeSeqRange, value: `${segmentDetail.firstWriteSeq} - ${segmentDetail.lastWriteSeq}` },
+                { label: m.explorer.fields.eventTimeRange, value: `${formatTimestamp(segmentDetail.minEventTime)} - ${formatTimestamp(segmentDetail.maxEventTime)}` },
               ]}
             />
             <ExplorerFieldGroup
-              title="Integrity / preview"
+              title={m.explorer.groups.integrityPreview}
               fields={[
-                { label: "Footer Health", value: segmentDetail.footerStatus },
-                { label: "Tail Status", value: segmentDetail.tailStatus },
-                { label: "Raw Preview", value: segmentDetail.rawPreviewHex || "Preview capped to first 64 KiB" },
+                { label: m.explorer.fields.footerHealth, value: localizeHealth(locale, segmentDetail.footerStatus) },
+                { label: m.explorer.fields.tailStatus, value: localizeHealth(locale, segmentDetail.tailStatus) },
+                { label: m.explorer.fields.rawPreview, value: segmentDetail.rawPreviewHex || "Preview capped to first 64 KiB" },
               ]}
             />
           </div>
@@ -183,73 +186,73 @@ export default function ExplorerPage({
         {!detailLoading && !detailError && activeTab === "wal" && walDetail ? (
           <div className={styles.pageStack}>
             <ExplorerFieldGroup
-              title="Write-ahead log snapshot"
+              title={m.explorer.groups.walSnapshot}
               fields={[
-                { label: "Path", value: walDetail.path },
-                { label: "Size", value: `${walDetail.sizeBytes}` },
-                { label: "Health", value: walDetail.health },
+                { label: m.explorer.fields.path, value: walDetail.path },
+                { label: m.explorer.fields.size, value: `${walDetail.sizeBytes}` },
+                { label: m.explorer.fields.health, value: localizeHealth(locale, walDetail.health) },
               ]}
             />
             <ExplorerFieldGroup
-              title="Batch envelope"
+              title={m.explorer.groups.batchEnvelope}
               fields={[
-                { label: "Batch Seq Range", value: `${walDetail.firstBatchSeq} - ${walDetail.lastBatchSeq}` },
-                { label: "Last End Offset", value: `${walDetail.lastEndOffset}` },
+                { label: m.explorer.fields.batchSeqRange, value: `${walDetail.firstBatchSeq} - ${walDetail.lastBatchSeq}` },
+                { label: m.explorer.fields.lastEndOffset, value: `${walDetail.lastEndOffset}` },
               ]}
             />
           </div>
         ) : null}
         {!detailLoading && !detailError && activeTab === "wal" && !walDetail ? (
-          <p className={styles.emptyCopy}>No write-ahead log snapshot is available for inspection in this workspace.</p>
+          <p className={styles.emptyCopy}>{m.explorer.empty.noWalDetail}</p>
         ) : null}
         {!detailLoading && !detailError && activeTab === "cursors" && !cursorDetail ? (
-          <p className={styles.emptyCopy}>Select a cursor row to inspect offsets, CRC status, and backup state.</p>
+          <p className={styles.emptyCopy}>{m.explorer.empty.selectCursor}</p>
         ) : null}
         {!detailLoading && !detailError && activeTab === "cursors" && cursorDetail ? (
           <div className={styles.pageStack}>
             <ExplorerFieldGroup
-              title="Cursor destination"
+              title={m.explorer.groups.cursorDestination}
               fields={[
-                { label: "Destination", value: cursorDetail.destination },
-                { label: "Write Seq", value: `${cursorDetail.writeSeq}` },
-                { label: "Updated At", value: formatTimestamp(cursorDetail.updatedAt) },
+                { label: m.explorer.fields.destination, value: cursorDetail.destination },
+                { label: m.explorer.fields.writeSeq, value: `${cursorDetail.writeSeq}` },
+                { label: m.explorer.fields.updatedAt, value: formatTimestamp(cursorDetail.updatedAt) },
               ]}
             />
             <ExplorerFieldGroup
-              title="Replay position"
+              title={m.explorer.groups.replayPosition}
               fields={[
-                { label: "Segment ID", value: `${cursorDetail.segmentID}` },
-                { label: "Block Offset", value: `${cursorDetail.blockOffset}` },
-                { label: "Record Index", value: `${cursorDetail.recordIndex}` },
+                { label: m.explorer.fields.segmentID, value: `${cursorDetail.segmentID}` },
+                { label: m.explorer.fields.blockOffset, value: `${cursorDetail.blockOffset}` },
+                { label: m.explorer.fields.recordIndex, value: `${cursorDetail.recordIndex}` },
               ]}
             />
             <ExplorerFieldGroup
-              title="Integrity"
+              title={m.explorer.groups.integrity}
               fields={[
-                { label: "CRC Status", value: cursorDetail.crcStatus },
-                { label: "Backup Status", value: cursorDetail.backupStatus },
+                { label: m.explorer.fields.crcStatus, value: localizeHealth(locale, cursorDetail.crcStatus) },
+                { label: m.explorer.fields.backupStatus, value: cursorDetail.backupStatus },
               ]}
             />
           </div>
         ) : null}
         {!detailLoading && !detailError && activeTab === "checkpoint" && !checkpointDetail ? (
-          <p className={styles.emptyCopy}>No checkpoint snapshot is available for audit in this workspace.</p>
+          <p className={styles.emptyCopy}>{m.explorer.empty.noCheckpointDetail}</p>
         ) : null}
         {!detailLoading && !detailError && activeTab === "checkpoint" && checkpointDetail ? (
           <div className={styles.pageStack}>
             <ExplorerFieldGroup
-              title="Checkpoint summary"
+              title={m.explorer.groups.checkpointSummary}
               fields={[
-                { label: "Last Batch Seq", value: `${checkpointDetail.lastBatchSeq}` },
-                { label: "Last WAL End Offset", value: `${checkpointDetail.lastWALEndOffset}` },
-                { label: "Version", value: `${checkpointDetail.version}` },
+                { label: m.explorer.fields.lastBatchSeq, value: `${checkpointDetail.lastBatchSeq}` },
+                { label: m.explorer.fields.lastWALEndOffset, value: `${checkpointDetail.lastWALEndOffset}` },
+                { label: m.explorer.fields.version, value: `${checkpointDetail.version}` },
               ]}
             />
             <ExplorerFieldGroup
-              title="Audit stamp"
+              title={m.explorer.groups.auditStamp}
               fields={[
-                { label: "Updated At", value: formatTimestamp(checkpointDetail.updatedAt) },
-                { label: "Integrity", value: checkpointDetail.integrityStatus },
+                { label: m.explorer.fields.updatedAt, value: formatTimestamp(checkpointDetail.updatedAt) },
+                { label: m.explorer.fields.integrityStatus, value: localizeHealth(locale, checkpointDetail.integrityStatus) },
               ]}
             />
           </div>
@@ -290,17 +293,18 @@ function formatTimestamp(value: number) {
   return new Date(value).toISOString().replace("T", " ").slice(0, 16);
 }
 
-function detailPaneNote(activeTab: ExplorerTab) {
+function detailPaneNote(locale: "zh-CN" | "en-US", activeTab: ExplorerTab) {
+  const notes = getMessages(locale).explorer.detailNotes;
   switch (activeTab) {
     case "segments":
-      return "Read-only inspection fields for the selected segment row.";
+      return notes.segments;
     case "wal":
-      return "Audit notes for the current write-ahead log snapshot.";
+      return notes.wal;
     case "cursors":
-      return "Replay cursor evidence remains isolated from the row ledger.";
+      return notes.cursors;
     case "checkpoint":
-      return "Checkpoint metadata is grouped here as a separate audit surface.";
+      return notes.checkpoint;
     default:
-      return "Read-only inspection details for the selected row.";
+      return notes.segments;
   }
 }

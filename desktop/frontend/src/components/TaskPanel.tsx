@@ -1,4 +1,6 @@
 import styles from "../styles/shell.module.css";
+import { getMessages } from "../i18n";
+import { useAppStore } from "../state/app-store";
 import type { TaskState } from "../state/app-store";
 
 type TaskPanelProps = {
@@ -7,14 +9,16 @@ type TaskPanelProps = {
 };
 
 export default function TaskPanel({ task, onCancel }: TaskPanelProps) {
+  const locale = useAppStore((state) => state.locale);
+  const m = getMessages(locale);
   if (!task) {
     return (
       <section className={`${styles.panel} ${styles.panelPadding}`}>
-        <p className={styles.eyebrow}>Task timeline</p>
+        <p className={styles.eyebrow}>{m.task.eyebrow}</p>
         <div className={styles.sectionHeader}>
-          <h3 className={styles.sectionTitle}>Task timeline</h3>
+          <h3 className={styles.sectionTitle}>{m.task.title}</h3>
         </div>
-        <p className={styles.emptyCopy}>No task has been requested from this desk yet.</p>
+        <p className={styles.emptyCopy}>{m.task.empty}</p>
       </section>
     );
   }
@@ -26,17 +30,17 @@ export default function TaskPanel({ task, onCancel }: TaskPanelProps) {
 
   const timelineItems = [
     {
-      label: "Requested",
+      label: m.task.requested,
       active: true,
-      detail: task.startedAt === "N/A" ? "Awaiting task start time" : task.startedAt,
+      detail: task.startedAt === "N/A" ? m.task.awaitingStart : task.startedAt,
     },
     {
-      label: "In progress",
+      label: m.task.inProgress,
       active: task.status === "running" || task.status === "succeeded" || task.status === "failed" || task.status === "cancelled",
-      detail: task.phase || task.message || "Waiting for phase update",
+      detail: task.phase || task.message || m.task.waitingPhase,
     },
     {
-      label: task.status === "failed" ? "Failed" : task.status === "cancelled" ? "Cancelled" : "Completed",
+      label: task.status === "failed" ? m.task.failed : task.status === "cancelled" ? m.task.cancelled : m.task.completed,
       active: task.status !== "running",
       detail: task.updatedAt === "N/A" ? task.message : task.updatedAt,
     },
@@ -44,9 +48,9 @@ export default function TaskPanel({ task, onCancel }: TaskPanelProps) {
 
   return (
     <section className={`${styles.panel} ${styles.panelPadding}`}>
-      <p className={styles.eyebrow}>Task timeline</p>
+      <p className={styles.eyebrow}>{m.task.eyebrow}</p>
       <div className={styles.sectionHeader}>
-        <h3 className={styles.sectionTitle}>Task timeline</h3>
+        <h3 className={styles.sectionTitle}>{m.task.title}</h3>
       </div>
       <ol className={styles.timelineList}>
         {timelineItems.map((item) => (
@@ -63,55 +67,55 @@ export default function TaskPanel({ task, onCancel }: TaskPanelProps) {
       </ol>
       <div className={styles.fieldList}>
         <div className={styles.fieldRow}>
-          <span className={styles.fieldKey}>Task</span>
+          <span className={styles.fieldKey}>{m.task.task}</span>
           <span>{task.kind}</span>
         </div>
         <div className={styles.fieldRow}>
-          <span className={styles.fieldKey}>Lifecycle</span>
-          <span>{task.phase || "pending"} {"->"} {task.status}</span>
+          <span className={styles.fieldKey}>{m.task.lifecycle}</span>
+          <span>{task.phase || m.task.pending} {"->"} {task.status}</span>
         </div>
         <div className={styles.fieldRow}>
-          <span className={styles.fieldKey}>Status</span>
+          <span className={styles.fieldKey}>{m.task.status}</span>
           <span>{task.status}</span>
         </div>
         <div className={styles.fieldRow}>
-          <span className={styles.fieldKey}>Phase</span>
+          <span className={styles.fieldKey}>{m.task.phase}</span>
           <span>{task.phase}</span>
         </div>
         <div className={styles.fieldRow}>
-          <span className={styles.fieldKey}>Message</span>
+          <span className={styles.fieldKey}>{m.task.message}</span>
           <span>{task.message}</span>
         </div>
         {task.target ? (
           <div className={styles.fieldRow}>
-            <span className={styles.fieldKey}>Target</span>
+            <span className={styles.fieldKey}>{m.task.target}</span>
             <span>{task.target}</span>
           </div>
         ) : null}
         {progressLabel ? (
           <div className={styles.fieldRow}>
-            <span className={styles.fieldKey}>Progress</span>
+            <span className={styles.fieldKey}>{m.task.progress}</span>
             <span>{progressLabel}</span>
           </div>
         ) : null}
         <div className={styles.fieldRow}>
-          <span className={styles.fieldKey}>Started</span>
+          <span className={styles.fieldKey}>{m.task.started}</span>
           <span>{task.startedAt}</span>
         </div>
         <div className={styles.fieldRow}>
-          <span className={styles.fieldKey}>Updated</span>
+          <span className={styles.fieldKey}>{m.task.updated}</span>
           <span>{task.updatedAt}</span>
         </div>
         {task.error ? (
           <div className={styles.fieldRow}>
-            <span className={styles.fieldKey}>Error</span>
+            <span className={styles.fieldKey}>{m.task.error}</span>
             <span>{task.error}</span>
           </div>
         ) : null}
         {task.canCancel && task.status === "running" ? (
           <div>
             <button className={`${styles.secondaryButton} ${styles.focusable}`} onClick={onCancel} type="button">
-              Cancel Task
+              {m.task.cancelTask}
             </button>
           </div>
         ) : null}

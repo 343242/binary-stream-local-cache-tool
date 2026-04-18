@@ -1,5 +1,7 @@
 import EmptyState from "../components/EmptyState";
 import StatusCard from "../components/StatusCard";
+import { getMessages, localizeHealth, localizeLockMode, localizeWorkspaceMode } from "../i18n";
+import { useAppStore } from "../state/app-store";
 import styles from "../styles/shell.module.css";
 import type { CursorRow, OverviewCard, SegmentRow } from "../state/app-store";
 
@@ -11,6 +13,8 @@ type OverviewPageProps = {
 };
 
 export default function OverviewPage({ cards, warnings, segments, cursors }: OverviewPageProps) {
+  const locale = useAppStore((state) => state.locale);
+  const m = getMessages(locale);
   const [leadCard, ...remainingCards] = cards;
   const summaryCards = remainingCards.slice(0, 2);
   const supportingCards = remainingCards.slice(2);
@@ -18,27 +22,32 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
   return (
     <div className={styles.pageStack}>
       <section className={`${styles.panel} ${styles.hero}`}>
-        <p className={styles.eyebrow}>Overview</p>
-        <h2 className={styles.heroTitle}>Readable enough for routine checks. Severe enough for maintenance windows.</h2>
-        <p className={styles.heroCopy}>Phase-1 desktop console for cache inspection, replay diagnostics, and guarded operations.</p>
+        <p className={styles.eyebrow}>{m.overview.eyebrow}</p>
+        <h2 className={styles.heroTitle}>{m.overview.title}</h2>
+        <p className={styles.heroCopy}>{m.overview.copy}</p>
       </section>
 
       {leadCard ? (
         <section className={styles.overviewMetrics}>
           <div className={styles.overviewMetricLead}>
             <StatusCard
-              key={leadCard.label}
-              eyebrow="Priority snapshot"
-              label={leadCard.label}
-              value={leadCard.value}
-              secondary={leadCard.secondary}
+              key={leadCard.key}
+              eyebrow={m.overview.prioritySnapshot}
+              label={localizeOverviewCardLabel(m, leadCard.key)}
+              value={localizeOverviewCardValue(locale, leadCard)}
+              secondary={localizeOverviewCardSecondary(locale, leadCard)}
               tier="hero"
               testId="overview-metric-lead"
             />
           </div>
           <div className={styles.overviewMetricSummary}>
             {summaryCards.map((card) => (
-              <StatusCard key={card.label} label={card.label} value={card.value} secondary={card.secondary} />
+              <StatusCard
+                key={card.key}
+                label={localizeOverviewCardLabel(m, card.key)}
+                value={localizeOverviewCardValue(locale, card)}
+                secondary={localizeOverviewCardSecondary(locale, card)}
+              />
             ))}
           </div>
         </section>
@@ -47,7 +56,12 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
       {supportingCards.length ? (
         <section className={styles.cardGrid}>
           {supportingCards.map((card) => (
-            <StatusCard key={card.label} label={card.label} value={card.value} secondary={card.secondary} />
+            <StatusCard
+              key={card.key}
+              label={localizeOverviewCardLabel(m, card.key)}
+              value={localizeOverviewCardValue(locale, card)}
+              secondary={localizeOverviewCardSecondary(locale, card)}
+            />
           ))}
         </section>
       ) : null}
@@ -55,11 +69,11 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
       <section className={`${styles.panel} ${styles.panelPadding}`}>
         <div className={styles.sectionHeader}>
           <div className={styles.pageStack}>
-            <p className={styles.eyebrow}>Maintenance windows</p>
-            <h3 className={styles.sectionTitle}>Warnings and operator cautions</h3>
+            <p className={styles.eyebrow}>{m.overview.maintenanceEyebrow}</p>
+            <h3 className={styles.sectionTitle}>{m.overview.maintenanceTitle}</h3>
           </div>
         </div>
-        <p className={styles.emptyCopy}>Use this region to spot the items that would block a routine inspection from becoming a repair or shutdown handoff.</p>
+        <p className={styles.emptyCopy}>{m.overview.maintenanceCopy}</p>
         {warnings.length ? (
           <div className={styles.fieldList}>
             {warnings.map((warning) => (
@@ -70,10 +84,10 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
           </div>
         ) : (
           <EmptyState
-            eyebrow="Maintenance windows"
+            eyebrow={m.overview.maintenanceEyebrow}
             variant="inline"
-            title="No active warnings"
-            message="The current workspace is readable without escalations or pending repair cues."
+            title={m.overview.noWarningsTitle}
+            message={m.overview.noWarningsCopy}
           />
         )}
       </section>
@@ -81,22 +95,22 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
       <section className={styles.pageStack}>
         <div className={styles.sectionHeader}>
           <div className={styles.pageStack}>
-            <p className={styles.eyebrow}>Recent activity</p>
-            <h3 className={styles.sectionTitle}>Segments and cursor handoff</h3>
+            <p className={styles.eyebrow}>{m.overview.activityEyebrow}</p>
+            <h3 className={styles.sectionTitle}>{m.overview.activityTitle}</h3>
           </div>
         </div>
-        <p className={styles.emptyCopy}>Track the latest write surfaces and downstream consumers before moving into deeper explorer or operations work.</p>
+        <p className={styles.emptyCopy}>{m.overview.activityCopy}</p>
         <div className={styles.cardGrid}>
           <div className={`${styles.panel} ${styles.panelPadding}`}>
             <div className={styles.sectionHeader}>
-              <h3 className={styles.sectionTitle}>Recent Segments</h3>
+              <h3 className={styles.sectionTitle}>{m.overview.recentSegments}</h3>
             </div>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Segment</th>
-                  <th>Records</th>
-                  <th>Health</th>
+                  <th>{m.explorer.tables.segment}</th>
+                  <th>{m.explorer.tables.records}</th>
+                  <th>{m.topBar.health}</th>
                 </tr>
               </thead>
               <tbody>
@@ -104,7 +118,7 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
                   <tr key={segment.segmentID}>
                     <td>{segment.segmentID}</td>
                     <td>{segment.recordCount}</td>
-                    <td>{segment.health}</td>
+                    <td>{localizeHealth(locale, segment.health)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -113,14 +127,14 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
 
           <div className={`${styles.panel} ${styles.panelPadding}`}>
             <div className={styles.sectionHeader}>
-              <h3 className={styles.sectionTitle}>Recent Cursors</h3>
+              <h3 className={styles.sectionTitle}>{m.overview.recentCursors}</h3>
             </div>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Destination</th>
-                  <th>Write Seq</th>
-                  <th>Status</th>
+                  <th>{m.explorer.tables.destination}</th>
+                  <th>{m.explorer.tables.writeSeq}</th>
+                  <th>{m.explorer.tables.status}</th>
                 </tr>
               </thead>
               <tbody>
@@ -128,7 +142,7 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
                   <tr key={cursor.destination}>
                     <td>{cursor.destination}</td>
                     <td>{cursor.writeSeq}</td>
-                    <td>{cursor.status}</td>
+                    <td>{localizeHealth(locale, cursor.status)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -138,4 +152,25 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
       </section>
     </div>
   );
+}
+
+function localizeOverviewCardLabel(messages: ReturnType<typeof getMessages>, key: OverviewCard["key"]) {
+  return messages.overview.cards[key];
+}
+
+function localizeOverviewCardValue(locale: "zh-CN" | "en-US", card: OverviewCard) {
+  if (card.key === "workspace") {
+    return localizeWorkspaceMode(locale, card.value);
+  }
+  if (card.key === "lock") {
+    return localizeLockMode(locale, card.value);
+  }
+  return card.value;
+}
+
+function localizeOverviewCardSecondary(locale: "zh-CN" | "en-US", card: OverviewCard) {
+  if (card.key === "lock") {
+    return localizeHealth(locale, card.secondary);
+  }
+  return card.secondary;
 }

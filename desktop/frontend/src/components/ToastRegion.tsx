@@ -1,18 +1,21 @@
 import styles from "../styles/shell.module.css";
+import { getMessages, type LocaleKey } from "../i18n";
 import type { ToastState } from "../state/app-store";
 
 type ToastRegionProps = {
+  locale: LocaleKey;
   toasts: ToastState[];
   onDismiss: (id: number) => void;
 };
 
-export default function ToastRegion({ toasts, onDismiss }: ToastRegionProps) {
+export default function ToastRegion({ locale, toasts, onDismiss }: ToastRegionProps) {
+  const m = getMessages(locale);
   if (toasts.length === 0) {
     return null;
   }
 
   return (
-    <aside className={styles.toastRegion} aria-label="Notifications">
+    <aside className={styles.toastRegion} aria-label={m.toast.ariaLabel}>
       {toasts.slice(-3).map((toast) => (
         <article
           key={toast.id}
@@ -21,13 +24,13 @@ export default function ToastRegion({ toasts, onDismiss }: ToastRegionProps) {
           <div className={styles.sectionHeader}>
             <strong>{toast.title}</strong>
             <button className={styles.toastDismiss} onClick={() => onDismiss(toast.id)} type="button">
-              Dismiss
+              {m.common.dismiss}
             </button>
           </div>
-          <p className={styles.eyebrow}>{toast.level === "info" ? "Desk notice" : toast.level === "success" ? "Completed action" : "Audit notice"}</p>
+          <p className={styles.eyebrow}>{toast.level === "info" ? m.toast.deskNotice : toast.level === "success" ? m.toast.completedAction : m.toast.auditNotice}</p>
           <p className={styles.emptyCopy}>{toast.message}</p>
           <p className={styles.cardLabel}>
-            {toast.level} · {toast.durationLabel}
+            {m.toast.levels[toast.level]} · {toast.durationLabel}
           </p>
         </article>
       ))}

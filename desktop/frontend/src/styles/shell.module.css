@@ -1,5 +1,6 @@
 .frame {
   min-height: 100dvh;
+  min-width: 1280px;
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr);
   gap: var(--space-6);
@@ -8,6 +9,10 @@
     radial-gradient(circle at top left, var(--shell-frame-wash-start), transparent 28%),
     radial-gradient(circle at bottom right, var(--shell-frame-wash-end), transparent 24%),
     var(--bg-canvas);
+}
+
+.frameScrollable {
+  overflow: auto;
 }
 
 .sidebar {
@@ -72,6 +77,10 @@
   cursor: pointer;
 }
 
+.navButtonLocked {
+  opacity: 0.64;
+}
+
 .navButtonActive {
   background: var(--shell-nav-active-surface);
   border-color: var(--shell-nav-active-border);
@@ -106,7 +115,6 @@
 
 .topBarMeta {
   display: flex;
-  flex-wrap: wrap;
   gap: 10px;
   color: var(--text-secondary);
   font-size: 0.92rem;
@@ -329,7 +337,6 @@
 
 .tabRow {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -605,53 +612,5 @@
   }
   to {
     background-position: -200% 0;
-  }
-}
-
-@media (max-width: 1360px) {
-  .overviewMetrics {
-    grid-template-columns: 1fr;
-  }
-
-  .cardGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 1280px) {
-  .frame {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    align-self: stretch;
-  }
-
-  .topBar {
-    grid-template-columns: 1fr;
-    align-items: start;
-  }
-
-  .badgeRow {
-    justify-content: flex-start;
-  }
-
-  .explorerLayout {
-    grid-template-columns: 1fr;
-  }
-
-  .operationsLayout {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 1180px) {
-  .fieldRow {
-    grid-template-columns: 1fr;
-  }
-
-  .toastRegion {
-    position: static;
-    width: 100%;
   }
 }

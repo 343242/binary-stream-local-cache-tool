@@ -23,18 +23,18 @@ describe("desktop app pages", () => {
 
   test("shows the landing empty state before a workspace is open", () => {
     render(<App />);
-    expect(screen.getByText("Open Cache Directory")).toBeInTheDocument();
-    expect(screen.getByText("Recent Directories")).toBeInTheDocument();
-    expect(screen.getByText(/supported workspace/i)).toBeInTheDocument();
+    expect(screen.getByText("打开缓存目录")).toBeInTheDocument();
+    expect(screen.getByText("最近目录")).toBeInTheDocument();
+    expect(screen.getByText("支持的工作区")).toBeInTheDocument();
   });
 
   it("renders workspace status inside the primary workspace rail", () => {
     render(<App />);
-    const workspaceRail = screen.getByRole("complementary", { name: /primary workspace/i });
+    const workspaceRail = screen.getByRole("complementary", { name: "主工作区" });
 
-    expect(within(workspaceRail).getByRole("heading", { level: 1, name: /observer-first desktop console/i })).toBeInTheDocument();
-    expect(within(workspaceRail).getByText("Workspace status")).toBeInTheDocument();
-    expect(within(workspaceRail).getByText(/fresh snapshot/i)).toBeInTheDocument();
+    expect(within(workspaceRail).getByRole("heading", { level: 1, name: "以观测为先的桌面控制台" })).toBeInTheDocument();
+    expect(within(workspaceRail).getByText("工作区状态")).toBeInTheDocument();
+    expect(within(workspaceRail).getByText("未打开工作区")).toBeInTheDocument();
   });
 
   it("renders the current snapshot header around the workspace path", () => {
@@ -53,9 +53,9 @@ describe("desktop app pages", () => {
 
     const snapshotHeader = screen.getByRole("banner");
 
-    expect(within(snapshotHeader).getByText("Current snapshot")).toBeInTheDocument();
+    expect(within(snapshotHeader).getByText("当前快照")).toBeInTheDocument();
     expect(within(snapshotHeader).getByRole("heading", { level: 2, name: "/var/lib/binary-stream/cache-alpha" })).toBeInTheDocument();
-    expect(within(snapshotHeader).getByText("Mode: HealthyObserver")).toBeInTheDocument();
+    expect(within(snapshotHeader).getByText("模式: 健康观察模式")).toBeInTheDocument();
   });
 
   test("renders overview cards after overview data loads", () => {
@@ -70,9 +70,9 @@ describe("desktop app pages", () => {
       page: "overview",
     });
     render(<App />);
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
-    expect(screen.getByText("HealthyObserver")).toBeInTheDocument();
-    expect(screen.getByText("Recent Segments")).toBeInTheDocument();
+    expect(screen.getByText("工作区")).toBeInTheDocument();
+    expect(screen.getByText("健康观察模式")).toBeInTheDocument();
+    expect(screen.getByText("最近段文件")).toBeInTheDocument();
     expect(screen.getByTestId("overview-metric-lead")).toBeInTheDocument();
   });
 
@@ -92,11 +92,11 @@ describe("desktop app pages", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: /readable enough for routine checks\. severe enough for maintenance windows\./i,
+        name: "日常巡检保持可读，维护窗口保持足够严肃。",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/^Maintenance windows$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Recent activity$/i)).toBeInTheDocument();
+    expect(screen.getByText("维护窗口")).toBeInTheDocument();
+    expect(screen.getByText("近期活动")).toBeInTheDocument();
   });
 
   test("shows no segments empty state when explorer has zero rows", () => {
@@ -113,7 +113,7 @@ describe("desktop app pages", () => {
       selectedSegment: null,
     });
     render(<App />);
-    expect(screen.getByText("No Segments Found")).toBeInTheDocument();
+    expect(screen.getByText("未发现段文件")).toBeInTheDocument();
   });
 
   it("keeps explorer detail content separate from the row list", () => {
@@ -130,9 +130,9 @@ describe("desktop app pages", () => {
 
     render(<App />);
 
-    expect(screen.getByText("Detail pane")).toBeInTheDocument();
-    expect(screen.getByText("Inspection notes")).toBeInTheDocument();
-    expect(screen.getByText("Select a row to inspect detailed fields and raw preview data.")).toBeInTheDocument();
+    expect(screen.getByText("详情面板")).toBeInTheDocument();
+    expect(screen.getByText("检查说明")).toBeInTheDocument();
+    expect(screen.getByText("选择一行后，可以在这里查看详细字段和原始预览数据。")).toBeInTheDocument();
   });
 
   it("keeps explorer audit copy visible when wal detail is unavailable", () => {
@@ -153,8 +153,8 @@ describe("desktop app pages", () => {
 
     render(<App />);
 
-    expect(screen.getByText("No WAL Present")).toBeInTheDocument();
-    expect(screen.getByText("No write-ahead log snapshot is available for inspection in this workspace.")).toBeInTheDocument();
+    expect(screen.getByText("当前没有 WAL")).toBeInTheDocument();
+    expect(screen.getByText("当前工作区没有可供检查的 WAL 快照。")).toBeInTheDocument();
   });
 
   test("renders the config page as read-only", () => {
@@ -169,8 +169,8 @@ describe("desktop app pages", () => {
       page: "config",
     });
     render(<App />);
-    expect(screen.getByText("Read-only inspection. Persistent configuration editing is deferred.")).toBeInTheDocument();
-    expect(screen.getAllByText("Allowed Range").length).toBeGreaterThan(0);
+    expect(screen.getByText("当前仅支持只读检查，持久化配置编辑仍然暂缓。")).toBeInTheDocument();
+    expect(screen.getAllByText("允许范围").length).toBeGreaterThan(0);
   });
 
   it("marks config as read-only audit content", () => {
@@ -187,14 +187,32 @@ describe("desktop app pages", () => {
 
     render(<App />);
 
-    expect(screen.getByText("Configuration audit ledger")).toBeInTheDocument();
-    expect(screen.getByText(/read-only inspection/i)).toBeInTheDocument();
+    expect(screen.getByText("配置审计账本")).toBeInTheDocument();
+    expect(screen.getByText("当前仅支持只读检查，持久化配置编辑仍然暂缓。")).toBeInTheDocument();
   });
 
   test("reopen uses the selected recent workspace path", () => {
     render(<App />);
-    fireEvent.click(screen.getAllByText("Reopen")[1]);
+    fireEvent.click(screen.getAllByText("重新打开")[1]);
     expect(screen.getByText("/srv/cache/replica-west")).toBeInTheDocument();
+  });
+
+  test("locale toggle switches the shell from Chinese to English", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "EN" }));
+
+    expect(screen.getByText("Open Cache Directory")).toBeInTheDocument();
+    expect(screen.getByText("Recent Directories")).toBeInTheDocument();
+  });
+
+  test("navigation is gated with a friendly toast before a workspace opens", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "浏览器" }));
+
+    expect(screen.getByText("请先打开缓存目录")).toBeInTheDocument();
+    expect(screen.getByText("打开缓存目录")).toBeInTheDocument();
   });
 
   test("invalid workspace recovery reopens the chooser instead of auto-reopening a recent path", () => {
@@ -208,7 +226,7 @@ describe("desktop app pages", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Choose Another Directory" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新选择目录" }));
     expect(onOpenWorkspace).toHaveBeenCalledWith();
   });
 
@@ -283,7 +301,7 @@ describe("desktop app pages", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText("stale snapshot")).toBeInTheDocument();
+      expect(screen.getByText("陈旧快照")).toBeInTheDocument();
     });
   });
 
@@ -292,8 +310,8 @@ describe("desktop app pages", () => {
       workspaceLoadState: "hydrating",
     });
     render(<App />);
-    expect(screen.getByText("Loading workspace")).toBeInTheDocument();
-    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.getByText("正在加载工作区")).toBeInTheDocument();
+    expect(screen.getByLabelText("加载中")).toBeInTheDocument();
   });
 
   test("clicking a segment row updates the detail pane", async () => {
@@ -309,7 +327,7 @@ describe("desktop app pages", () => {
       selectedSegment: null,
     });
     render(<App />);
-    expect(screen.getByText("Select a row to inspect detailed fields and raw preview data.")).toBeInTheDocument();
+    expect(screen.getByText("选择一行后，可以在这里查看详细字段和原始预览数据。")).toBeInTheDocument();
     fireEvent.click(screen.getByText("48"));
     await waitFor(() => {
       expect(screen.getByText("segments/48.seg")).toBeInTheDocument();

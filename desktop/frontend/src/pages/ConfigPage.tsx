@@ -1,4 +1,6 @@
 import EmptyState from "../components/EmptyState";
+import { getMessages } from "../i18n";
+import { useAppStore } from "../state/app-store";
 import styles from "../styles/shell.module.css";
 import type { ConfigRow } from "../state/app-store";
 
@@ -8,11 +10,13 @@ type ConfigPageProps = {
 };
 
 export default function ConfigPage({ hasWorkspace, sections }: ConfigPageProps) {
+  const locale = useAppStore((state) => state.locale);
+  const m = getMessages(locale);
   if (!hasWorkspace) {
     return (
       <EmptyState
-        title="Open a workspace to inspect configuration"
-        message="Phase-1 configuration is read-only and only becomes available after a valid workspace opens."
+        title={m.config.emptyTitle}
+        message={m.config.emptyCopy}
       />
     );
   }
@@ -25,39 +29,37 @@ export default function ConfigPage({ hasWorkspace, sections }: ConfigPageProps) 
       <section className={`${styles.panel} ${styles.panelPadding}`}>
         <div className={styles.sectionHeader}>
           <div className={styles.pageStack}>
-            <p className={styles.eyebrow}>Configuration audit surface</p>
-            <h3 className={styles.sectionTitle}>Configuration audit ledger</h3>
+            <p className={styles.eyebrow}>{m.config.eyebrow}</p>
+            <h3 className={styles.sectionTitle}>{m.config.title}</h3>
           </div>
           <div className={styles.badgeRow}>
-            <span className={styles.badge}>{sectionCount} sections</span>
-            <span className={styles.badge}>{fieldCount} captured fields</span>
+            <span className={styles.badge}>{sectionCount} {m.config.sectionsCaptured}</span>
+            <span className={styles.badge}>{fieldCount} {m.config.fieldsCaptured}</span>
           </div>
         </div>
-        <p className={styles.readonlyNote}>Read-only inspection. Persistent configuration editing is deferred.</p>
-        <p className={styles.emptyCopy}>
-          Effective values, startup defaults, and allowed ranges are preserved here as an audit ledger for operator review.
-        </p>
+        <p className={styles.readonlyNote}>{m.config.readonly}</p>
+        <p className={styles.emptyCopy}>{m.config.copy}</p>
       </section>
 
       {Object.entries(sections).map(([section, rows]) => (
         <section key={section} className={`${styles.panel} ${styles.panelPadding} ${styles.configSection}`}>
           <div className={styles.sectionHeader}>
             <div className={styles.pageStack}>
-              <p className={styles.eyebrow}>Audit section</p>
-              <h3 className={styles.sectionTitle}>{section} ledger</h3>
+              <p className={styles.eyebrow}>{m.config.sectionEyebrow}</p>
+              <h3 className={styles.sectionTitle}>{section} {m.config.sectionLedgerSuffix}</h3>
             </div>
-            <span className={styles.badge}>{rows.length} fields</span>
+            <span className={styles.badge}>{rows.length} {m.config.fieldsCaptured}</span>
           </div>
-          <p className={styles.emptyCopy}>Captured startup-only values for audit comparison and maintenance review.</p>
+          <p className={styles.emptyCopy}>{m.config.sectionCopy}</p>
           <div className={styles.configTableWrapper}>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Setting</th>
-                  <th>Effective Snapshot</th>
-                  <th>Startup Default</th>
-                  <th>Allowed Range</th>
-                  <th>Audit Note</th>
+                  <th>{m.config.table.setting}</th>
+                  <th>{m.config.table.effective}</th>
+                  <th>{m.config.table.startupDefault}</th>
+                  <th>{m.config.table.allowedRange}</th>
+                  <th>{m.config.table.note}</th>
                 </tr>
               </thead>
               <tbody>

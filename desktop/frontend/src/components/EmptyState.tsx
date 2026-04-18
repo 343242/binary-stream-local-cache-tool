@@ -1,4 +1,6 @@
 import styles from "../styles/shell.module.css";
+import { getMessages } from "../i18n";
+import { useAppStore } from "../state/app-store";
 
 type EmptyStateProps = {
   title: string;
@@ -12,11 +14,13 @@ type EmptyStateProps = {
 export default function EmptyState({
   title,
   message,
-  eyebrow = "Inspection note",
+  eyebrow,
   variant = "panel",
   actionLabel,
   onAction,
 }: EmptyStateProps) {
+  const locale = useAppStore((state) => state.locale);
+  const m = getMessages(locale);
   const containerClassName =
     variant === "panel"
       ? `${styles.panel} ${styles.panelPadding} ${styles.emptyState}`
@@ -24,7 +28,7 @@ export default function EmptyState({
 
   return (
     <section className={containerClassName}>
-      <p className={styles.eyebrow}>{eyebrow}</p>
+      <p className={styles.eyebrow}>{eyebrow ?? m.emptyState.inspectionNote}</p>
       <h3 className={styles.emptyTitle}>{title}</h3>
       <p className={styles.emptyCopy}>{message}</p>
       {actionLabel ? (

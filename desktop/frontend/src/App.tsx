@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import LoadingSkeleton from "./components/LoadingSkeleton";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
+import ToastRegion from "./components/ToastRegion";
+import { getMessages, nextLocale } from "./i18n";
 import ConfigPage from "./pages/ConfigPage";
 import ExplorerPage from "./pages/ExplorerPage";
 import LandingPage from "./pages/LandingPage";
@@ -13,6 +15,7 @@ import styles from "./styles/shell.module.css";
 
 export default function App() {
   const {
+    locale,
     page,
     workspace,
     workspaceLoadState,
@@ -37,6 +40,7 @@ export default function App() {
     toasts,
     confirmDialog,
     setPage,
+    setLocale,
     setExplorerTab,
     setSelectedSegment,
     setSelectedCursor,
@@ -52,6 +56,7 @@ export default function App() {
     dismissToast,
   } = useAppStore();
 
+  const m = getMessages(locale);
   const isInvalidWorkspace = workspace?.mode === "InvalidWorkspace";
   const isOpeningWorkspace = workspaceLoadState === "choosing" || workspaceLoadState === "hydrating";
 
@@ -60,17 +65,23 @@ export default function App() {
   }, [initialiseRuntime]);
 
   return (
-    <main className={styles.frame}>
-      <Sidebar activePage={page} onNavigate={setPage} workspace={workspace} />
+    <main className={`${styles.frame} ${styles.frameScrollable}`}>
+      <Sidebar activePage={page} onNavigate={setPage} workspace={workspace} locale={locale} />
       <section className={styles.content}>
-        <TopBar workspace={workspace} onRefresh={refresh} workspaceLoadState={workspaceLoadState} />
+        <TopBar
+          locale={locale}
+          onToggleLocale={() => setLocale(nextLocale(locale))}
+          workspace={workspace}
+          onRefresh={refresh}
+          workspaceLoadState={workspaceLoadState}
+        />
         <div className={styles.pageStack}>
           {isOpeningWorkspace && !workspace ? (
             <section className={`${styles.panel} ${styles.panelPadding}`}>
               <div className={styles.pageStack}>
-                <h3 className={styles.sectionTitle}>Loading workspace</h3>
-                <p className={styles.emptyCopy}>Validating the selected root and hydrating the initial snapshot.</p>
-                <LoadingSkeleton rows={4} />
+                <h3 className={styles.sectionTitle}>{m.common.loadingWorkspace}</h3>
+                <p className={styles.emptyCopy}>{m.common.loadingWorkspaceCopy}</p>
+                <LoadingSkeleton rows={4} ariaLabel={m.common.loading} />
               </div>
             </section>
           ) : !workspace || isInvalidWorkspace ? (
@@ -80,7 +91,7 @@ export default function App() {
                 isInvalidWorkspace
                   ? {
                       path: workspace.rootPath,
-                      reason: workspace.invalidReason ?? "The selected path does not match the required cache layout.",
+                      reason: workspace.invalidReason ?? (locale === "zh-CN" ? "所选路径不符合要求的缓存布局。" : "The selected path does not match the required cache layout."),
                     }
                   : undefined
               }
@@ -114,7 +125,6 @@ export default function App() {
               selectedOperation={selectedOperation}
               latestResult={latestResult}
               currentTask={currentTask}
-              toasts={toasts}
               confirmDialog={confirmDialog}
               onSelectOperation={setSelectedOperation}
               onRunOperation={requestOperation}
@@ -122,11 +132,11 @@ export default function App() {
               onDismissDialog={dismissDialog}
               onOpenRepair={openRepairFromResult}
               onCancelTask={cancelCurrentTask}
-              onDismissToast={dismissToast}
             />
           )}
         </div>
       </section>
+      <ToastRegion locale={locale} toasts={toasts} onDismiss={dismissToast} />
     </main>
   );
 }

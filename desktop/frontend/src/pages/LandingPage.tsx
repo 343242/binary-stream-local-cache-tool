@@ -1,4 +1,6 @@
 import EmptyState from "../components/EmptyState";
+import { getMessages } from "../i18n";
+import { useAppStore } from "../state/app-store";
 import styles from "../styles/shell.module.css";
 
 type LandingPageProps = {
@@ -8,13 +10,15 @@ type LandingPageProps = {
 };
 
 export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpenWorkspace }: LandingPageProps) {
+  const locale = useAppStore((state) => state.locale);
+  const m = getMessages(locale);
   if (invalidWorkspace) {
     return (
       <EmptyState
-        eyebrow="Landing"
-        title="Not a Cache Workspace"
+        eyebrow={m.landing.eyebrow}
+        title={m.landing.invalidTitle}
         message={`${invalidWorkspace.path} does not contain the expected cache layout. ${invalidWorkspace.reason}`}
-        actionLabel="Choose Another Directory"
+        actionLabel={m.common.chooseAnotherDirectory}
         onAction={() => onOpenWorkspace()}
       />
     );
@@ -22,34 +26,29 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
 
   return (
     <section className={`${styles.panel} ${styles.hero}`}>
-      <p className={styles.eyebrow}>Landing</p>
-      <h2 className={styles.heroTitle}>Open one cache root and move into inspection with context already in frame.</h2>
-      <p className={styles.heroCopy}>
-        Phase-1 desktop console for cache inspection, replay diagnostics, and guarded operations. Start in observer mode,
-        keep the shell readable for routine checks, and escalate deliberately only when the shell calls for operator handoff.
-      </p>
+      <p className={styles.eyebrow}>{m.landing.eyebrow}</p>
+      <h2 className={styles.heroTitle}>{m.landing.title}</h2>
+      <p className={styles.heroCopy}>{m.landing.copy}</p>
       <div>
         <button className={`${styles.primaryButton} ${styles.focusable}`} onClick={() => onOpenWorkspace()} type="button">
-          Open Cache Directory
+          {m.common.openCacheDirectory}
         </button>
       </div>
       <section className={`${styles.panel} ${styles.panelPadding}`}>
         <div className={styles.pageStack}>
-          <p className={styles.eyebrow}>Supported workspace</p>
-          <h3 className={styles.sectionTitle}>What this shell can open</h3>
-          <p className={styles.emptyCopy}>
-            Open a cache root that contains the expected segment, WAL, cursor, and checkpoint layout. Unsupported roots stay on the landing desk so you can choose another directory safely.
-          </p>
+          <p className={styles.eyebrow}>{m.landing.supportedWorkspaceEyebrow}</p>
+          <h3 className={styles.sectionTitle}>{m.landing.supportedWorkspaceTitle}</h3>
+          <p className={styles.emptyCopy}>{m.landing.supportedWorkspaceCopy}</p>
         </div>
       </section>
       <section className={styles.pageStack}>
         <div className={styles.sectionHeader}>
           <div className={styles.pageStack}>
-            <p className={styles.eyebrow}>Recent workspaces</p>
-            <h3 className={styles.sectionTitle}>Recent Directories</h3>
+            <p className={styles.eyebrow}>{m.landing.recentEyebrow}</p>
+            <h3 className={styles.sectionTitle}>{m.landing.recentTitle}</h3>
           </div>
         </div>
-        <p className={styles.emptyCopy}>Resume the last operator roots inspected from this shell or open a new cache workspace.</p>
+        <p className={styles.emptyCopy}>{m.landing.recentCopy}</p>
         <div className={styles.recentList}>
           {recentWorkspaces.slice(0, 5).map((workspace) => (
             <div key={workspace} className={styles.recentItem}>
@@ -59,7 +58,7 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
                 onClick={() => onOpenWorkspace(workspace)}
                 type="button"
               >
-                Reopen
+                {m.common.reopen}
               </button>
             </div>
           ))}

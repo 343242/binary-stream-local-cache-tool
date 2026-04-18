@@ -1,22 +1,15 @@
 import ConfirmDialog from "../components/ConfirmDialog";
 import TaskPanel from "../components/TaskPanel";
-import ToastRegion from "../components/ToastRegion";
+import { formatMessage, getMessages, localizeLockMode, localizeWorkspaceMode } from "../i18n";
+import { useAppStore } from "../state/app-store";
 import styles from "../styles/shell.module.css";
 import type {
   ConfirmDialogState,
   OperationKey,
   OperationResultState,
   TaskState,
-  ToastState,
   WorkspaceState,
 } from "../state/app-store";
-
-const operations: { key: OperationKey; title: string; description: string; maintenanceRequired: boolean }[] = [
-  { key: "verify", title: "Verify", description: "Run read-only verification and surface repairable corruption.", maintenanceRequired: false },
-  { key: "close-check", title: "Close-check", description: "Inspect lifecycle state before restart or maintenance.", maintenanceRequired: false },
-  { key: "repair-tail", title: "Repair-tail", description: "Repair a damaged segment tail with explicit confirmation.", maintenanceRequired: true },
-  { key: "shutdown", title: "Shutdown", description: "Perform a guarded shutdown action.", maintenanceRequired: true },
-];
 
 type OperationsPageProps = {
   workspace: WorkspaceState | null;
@@ -24,7 +17,6 @@ type OperationsPageProps = {
   selectedOperation: OperationKey;
   latestResult: OperationResultState | null;
   currentTask: TaskState | null;
-  toasts: ToastState[];
   confirmDialog: ConfirmDialogState | null;
   onSelectOperation: (operation: OperationKey) => void;
   onRunOperation: (operation: OperationKey) => void;
@@ -32,7 +24,6 @@ type OperationsPageProps = {
   onDismissDialog: () => void;
   onOpenRepair: () => void;
   onCancelTask: () => void;
-  onDismissToast: (id: number) => void;
 };
 
 export default function OperationsPage({
@@ -41,7 +32,6 @@ export default function OperationsPage({
   selectedOperation,
   latestResult,
   currentTask,
-  toasts,
   confirmDialog,
   onSelectOperation,
   onRunOperation,
@@ -49,8 +39,15 @@ export default function OperationsPage({
   onDismissDialog,
   onOpenRepair,
   onCancelTask,
-  onDismissToast,
 }: OperationsPageProps) {
+  const locale = useAppStore((state) => state.locale);
+  const m = getMessages(locale);
+  const operations: { key: OperationKey; title: string; description: string; maintenanceRequired: boolean }[] = [
+    { key: "verify", title: m.operations.operationTitles.verify, description: m.operations.operationDescriptions.verify, maintenanceRequired: false },
+    { key: "close-check", title: m.operations.operationTitles.closeCheck, description: m.operations.operationDescriptions.closeCheck, maintenanceRequired: false },
+    { key: "repair-tail", title: m.operations.operationTitles.repairTail, description: m.operations.operationDescriptions.repairTail, maintenanceRequired: true },
+    { key: "shutdown", title: m.operations.operationTitles.shutdown, description: m.operations.operationDescriptions.shutdown, maintenanceRequired: true },
+  ];
   const operation = operations.find((item) => item.key === selectedOperation) ?? operations[0];
   const unhealthyWorkspace =
     !workspace ||
@@ -62,55 +59,55 @@ export default function OperationsPage({
   const blocked = unhealthyWorkspace || needsMaintenance || needsSegment || staleSnapshot;
   const preconditions = [
     {
-      label: "workspace posture",
-      value: workspace?.mode === "HealthyMaintenance" ? "maintenance ready" : workspace?.mode ?? "no workspace",
+      label: m.operations.preconditions.workspacePosture,
+      value: workspace?.mode === "HealthyMaintenance" ? m.operations.preconditions.maintenanceReady : localizeWorkspaceMode(locale, workspace?.mode ?? "NoWorkspace"),
       met: workspace?.mode === "HealthyMaintenance" || !operation.maintenanceRequired,
     },
     {
-      label: "lock posture",
-      value: workspace?.lockMode ?? "N/A",
+      label: m.operations.preconditions.lockPosture,
+      value: localizeLockMode(locale, workspace?.lockMode ?? m.common.na),
       met: workspace?.lockMode === "MaintenanceExclusive" || !operation.maintenanceRequired,
     },
     {
-      label: "snapshot",
-      value: workspace?.stale ? "stale snapshot" : "fresh snapshot",
+      label: m.operations.preconditions.snapshot,
+      value: workspace?.stale ? (locale === "zh-CN" ? "陈旧快照" : "stale snapshot") : (locale === "zh-CN" ? "新鲜快照" : "fresh snapshot"),
       met: !workspace?.stale,
     },
     {
-      label: "repair target",
-      value: selectedSegmentID ? `segment ${selectedSegmentID}` : "select a segment",
+      label: m.operations.preconditions.repairTarget,
+      value: selectedSegmentID ? formatMessage(locale === "zh-CN" ? "段文件 {segmentID}" : "segment {segmentID}", { segmentID: selectedSegmentID }) : m.operations.preconditions.selectSegment,
       met: operation.key !== "repair-tail" || Boolean(selectedSegmentID),
     },
   ];
   const impactLines =
     operation.key === "repair-tail"
       ? [
-          "May truncate a damaged tail region to restore read consistency.",
-          "Emits an auditable operation result and task lifecycle trail.",
-          selectedSegmentID ? `Selected segment ${selectedSegmentID} will be passed to the backend operation.` : "A repair candidate must be selected before the confirm gate can open.",
+          m.operations.impactLines.repairTail1,
+          m.operations.impactLines.repairTail2,
+          selectedSegmentID ? formatMessage(m.operations.impactLines.repairTailWithSegment, { segmentID: selectedSegmentID }) : m.operations.impactLines.repairTailWithoutSegment,
         ]
       : operation.key === "shutdown"
         ? [
-            "Requests a guarded stop through the backend shutdown flow.",
-            "Emits an auditable operation result and task lifecycle trail.",
-            "Requires maintenance posture before the confirm gate can open.",
+            m.operations.impactLines.shutdown1,
+            m.operations.impactLines.shutdown2,
+            m.operations.impactLines.shutdown3,
           ]
         : [
-            "Keeps the workspace read-only throughout the request.",
-            "Emits an auditable operation result and task lifecycle trail.",
-            "Leaves the latest result surface separate from the running task timeline.",
+            m.operations.impactLines.readonly1,
+            m.operations.impactLines.readonly2,
+            m.operations.impactLines.readonly3,
           ];
   const destructive = operation.maintenanceRequired;
-  const actionLabel = destructive ? "Review impact" : `Run ${operation.title}`;
+  const actionLabel = destructive ? m.operations.reviewImpact : `${m.operations.runPrefix} ${operation.title}`;
 
   return (
     <div className={styles.pageStack}>
       <div className={styles.operationsLayout}>
         <section className={`${styles.panel} ${styles.panelPadding} ${styles.operationRail}`}>
-          <p className={styles.eyebrow}>Action desk</p>
+          <p className={styles.eyebrow}>{m.operations.actionDesk}</p>
           <div className={styles.pageStack}>
             <div className={styles.pageStack}>
-              <span className={styles.summaryLabel}>Read-only actions</span>
+              <span className={styles.summaryLabel}>{m.operations.readonlyActions}</span>
               {operations.filter((item) => !item.maintenanceRequired).map((item) => (
                 <button
                   key={item.key}
@@ -124,7 +121,7 @@ export default function OperationsPage({
               ))}
             </div>
             <div className={styles.pageStack}>
-              <span className={styles.summaryLabel}>Destructive maintenance actions</span>
+              <span className={styles.summaryLabel}>{m.operations.destructiveActions}</span>
               {operations.filter((item) => item.maintenanceRequired).map((item) => (
                 <button
                   key={item.key}
@@ -142,10 +139,10 @@ export default function OperationsPage({
 
         <section className={styles.pageStack}>
           <section className={`${styles.panel} ${styles.panelPadding} ${destructive ? styles.operationHeroDanger : styles.operationHero}`}>
-            <p className={styles.eyebrow}>{destructive ? "Destructive maintenance action" : "Read-only inspection action"}</p>
+            <p className={styles.eyebrow}>{destructive ? m.operations.destructiveEyebrow : m.operations.readonlyEyebrow}</p>
             <div className={styles.sectionHeader}>
               <h3 className={styles.sectionTitle}>{operation.title}</h3>
-              {operation.maintenanceRequired ? <span className={`${styles.badge} ${styles.dangerBadge}`}>danger</span> : null}
+              {operation.maintenanceRequired ? <span className={`${styles.badge} ${styles.dangerBadge}`}>{m.operations.danger}</span> : null}
             </div>
             <p className={styles.emptyCopy}>{operation.description}</p>
             <div className={styles.preconditionList}>
@@ -157,7 +154,7 @@ export default function OperationsPage({
               ))}
             </div>
             <div className={styles.operationImpactBlock}>
-              <h4 className={styles.operationSubheading}>Impact preview</h4>
+              <h4 className={styles.operationSubheading}>{m.operations.impactPreview}</h4>
               <ul className={styles.dialogList}>
                 {impactLines.map((line) => (
                   <li key={line}>{line}</li>
@@ -166,15 +163,15 @@ export default function OperationsPage({
             </div>
             {blocked ? (
               <div className={styles.operationBlockedPanel}>
-                <h4 className={styles.operationSubheading}>Blocked before confirmation</h4>
+                <h4 className={styles.operationSubheading}>{m.operations.blockedTitle}</h4>
                 <p className={styles.emptyCopy}>
                   {unhealthyWorkspace
-                    ? "This action is blocked until a healthy workspace is open and readable in the shell."
+                    ? m.operations.blockedUnhealthy
                     : staleSnapshot
-                      ? "Refresh the workspace before the confirm gate can open. Destructive actions require a fresh snapshot."
+                      ? m.operations.blockedStale
                       : needsSegment
-                    ? "Select a repair candidate from Explorer or from the latest verify result before the confirm gate can open."
-                    : "This action is blocked until the workspace holds MaintenanceExclusive and reaches maintenance posture."}
+                    ? m.operations.blockedSegment
+                    : m.operations.blockedMaintenance}
                 </p>
               </div>
             ) : (
@@ -189,12 +186,12 @@ export default function OperationsPage({
           <TaskPanel task={currentTask} onCancel={onCancelTask} />
 
           <section className={`${styles.panel} ${styles.panelPadding}`}>
-            <p className={styles.eyebrow}>Latest result</p>
+            <p className={styles.eyebrow}>{m.operations.latestResultEyebrow}</p>
             <div className={styles.sectionHeader}>
-              <h3 className={styles.sectionTitle}>Latest result</h3>
+              <h3 className={styles.sectionTitle}>{m.operations.latestResultTitle}</h3>
             </div>
             {!latestResult ? (
-              <p className={styles.emptyCopy}>No operation result has been recorded yet.</p>
+              <p className={styles.emptyCopy}>{m.operations.noLatestResult}</p>
             ) : (
               <div className={styles.fieldList}>
                 <p className={styles.emptyCopy}>{latestResult.summary}</p>
@@ -206,7 +203,7 @@ export default function OperationsPage({
                 ))}
                 {latestResult.repairableSegment ? (
                   <button className={`${styles.secondaryButton} ${styles.focusable}`} onClick={onOpenRepair} type="button">
-                    Open Repair
+                    {m.operations.openRepair}
                   </button>
                 ) : null}
               </div>
@@ -216,7 +213,6 @@ export default function OperationsPage({
       </div>
 
       <ConfirmDialog dialog={confirmDialog} onConfirm={onConfirmDialog} onCancel={onDismissDialog} />
-      <ToastRegion toasts={toasts} onDismiss={onDismissToast} />
     </div>
   );
 }
