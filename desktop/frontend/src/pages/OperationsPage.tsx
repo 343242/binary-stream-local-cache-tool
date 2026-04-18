@@ -52,9 +52,14 @@ export default function OperationsPage({
   onDismissToast,
 }: OperationsPageProps) {
   const operation = operations.find((item) => item.key === selectedOperation) ?? operations[0];
+  const unhealthyWorkspace =
+    !workspace ||
+    workspace.mode === "DegradedReadOnly" ||
+    workspace.mode === "InvalidWorkspace";
   const needsMaintenance = operation.maintenanceRequired && workspace?.mode !== "HealthyMaintenance";
   const needsSegment = operation.key === "repair-tail" && !selectedSegmentID;
-  const blocked = needsMaintenance || needsSegment;
+  const staleSnapshot = operation.maintenanceRequired && Boolean(workspace?.stale);
+  const blocked = unhealthyWorkspace || needsMaintenance || needsSegment || staleSnapshot;
   const preconditions = [
     {
       label: "workspace posture",
@@ -163,7 +168,11 @@ export default function OperationsPage({
               <div className={styles.operationBlockedPanel}>
                 <h4 className={styles.operationSubheading}>Blocked before confirmation</h4>
                 <p className={styles.emptyCopy}>
-                  {needsSegment
+                  {unhealthyWorkspace
+                    ? "This action is blocked until a healthy workspace is open and readable in the shell."
+                    : staleSnapshot
+                      ? "Refresh the workspace before the confirm gate can open. Destructive actions require a fresh snapshot."
+                      : needsSegment
                     ? "Select a repair candidate from Explorer or from the latest verify result before the confirm gate can open."
                     : "This action is blocked until the workspace holds MaintenanceExclusive and reaches maintenance posture."}
                 </p>

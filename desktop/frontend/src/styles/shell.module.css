@@ -205,12 +205,30 @@
   gap: 16px;
 }
 
+.overviewMetrics {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+  gap: 16px;
+}
+
+.overviewMetricLead,
+.overviewMetricSummary {
+  display: grid;
+  gap: 16px;
+}
+
 .statusCard {
   min-height: 140px;
   padding: 18px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(233, 238, 242, 0.94));
+}
+
+.statusCardHero {
+  min-height: 100%;
+  padding: 24px;
+  background: linear-gradient(180deg, rgba(245, 248, 251, 0.98), rgba(228, 236, 242, 0.98));
 }
 
 .cardLabel {
@@ -591,6 +609,10 @@
 }
 
 @media (max-width: 1360px) {
+  .overviewMetrics {
+    grid-template-columns: 1fr;
+  }
+
   .cardGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

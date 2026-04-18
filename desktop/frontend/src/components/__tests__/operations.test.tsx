@@ -115,4 +115,23 @@ describe("operations page", () => {
     expect(screen.queryByRole("button", { name: "Run Repair-tail" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  test("stale workspace state blocks destructive actions before confirmation", () => {
+    const initial = createInitialState();
+    setOperationState({
+      selectedOperation: "repair-tail",
+      selectedSegment: initial.recentSegments[0],
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyMaintenance",
+        lockMode: "MaintenanceExclusive",
+        health: "ok",
+        stale: true,
+      },
+    });
+    render(<App />);
+    expect(screen.getByText("Blocked before confirmation")).toBeInTheDocument();
+    expect(screen.getAllByText(/stale snapshot/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Review impact" })).not.toBeInTheDocument();
+  });
 });

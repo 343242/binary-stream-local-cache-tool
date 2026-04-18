@@ -11,6 +11,10 @@ type OverviewPageProps = {
 };
 
 export default function OverviewPage({ cards, warnings, segments, cursors }: OverviewPageProps) {
+  const [leadCard, ...remainingCards] = cards;
+  const summaryCards = remainingCards.slice(0, 2);
+  const supportingCards = remainingCards.slice(2);
+
   return (
     <div className={styles.pageStack}>
       <section className={`${styles.panel} ${styles.hero}`}>
@@ -19,11 +23,34 @@ export default function OverviewPage({ cards, warnings, segments, cursors }: Ove
         <p className={styles.heroCopy}>Phase-1 desktop console for cache inspection, replay diagnostics, and guarded operations.</p>
       </section>
 
-      <section className={styles.cardGrid}>
-        {cards.map((card) => (
-          <StatusCard key={card.label} label={card.label} value={card.value} secondary={card.secondary} />
-        ))}
-      </section>
+      {leadCard ? (
+        <section className={styles.overviewMetrics}>
+          <div className={styles.overviewMetricLead}>
+            <StatusCard
+              key={leadCard.label}
+              eyebrow="Priority snapshot"
+              label={leadCard.label}
+              value={leadCard.value}
+              secondary={leadCard.secondary}
+              tier="hero"
+              testId="overview-metric-lead"
+            />
+          </div>
+          <div className={styles.overviewMetricSummary}>
+            {summaryCards.map((card) => (
+              <StatusCard key={card.label} label={card.label} value={card.value} secondary={card.secondary} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {supportingCards.length ? (
+        <section className={styles.cardGrid}>
+          {supportingCards.map((card) => (
+            <StatusCard key={card.label} label={card.label} value={card.value} secondary={card.secondary} />
+          ))}
+        </section>
+      ) : null}
 
       <section className={`${styles.panel} ${styles.panelPadding}`}>
         <div className={styles.sectionHeader}>

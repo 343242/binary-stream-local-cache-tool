@@ -32,6 +32,7 @@ export type OverviewCard = {
   label: string;
   value: string;
   secondary: string;
+  tier?: "default" | "hero";
 };
 
 export type SegmentRow = {
@@ -440,7 +441,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
           if (!workspace || typeof workspace !== "object") {
             return;
           }
-          const mapped = mapWorkspaceState(workspace as BoundWorkspaceState);
+          const mapped = mapWorkspaceState(workspace as BoundWorkspaceState, get().workspace?.stale ?? false);
           set({ workspace: mapped });
           if (mapped.rootPath && mapped.mode !== "InvalidWorkspace") {
             void hydrateFromBindings(mapped.rootPath, set, "hydrating");
@@ -523,7 +524,7 @@ async function hydrateFromBindings(
     ]);
 
     set({
-      workspace: mapWorkspaceState(workspace),
+      workspace: mapWorkspaceState(workspace, overview.isStale),
       overviewCards: mapOverviewCards(overview),
       warningSummary: overview.warnings.map((warning) => warning.message),
       recentSegments: mapSegments(segments),
@@ -668,20 +669,20 @@ async function loadCursorDetail(cursor: CursorRow, set: typeof useAppStore.setSt
   }
 }
 
-function mapWorkspaceState(workspace: BoundWorkspaceState): WorkspaceState {
+function mapWorkspaceState(workspace: BoundWorkspaceState, stale = false): WorkspaceState {
   return {
     rootPath: workspace.rootPath,
     mode: workspace.mode,
     lockMode: workspace.lockMode,
     health: workspace.health,
-    stale: false,
+    stale,
     invalidReason: workspace.reason || undefined,
   };
 }
 
 function mapOverviewCards(overview: OverviewVM): OverviewCard[] {
   return [
-    { label: "Workspace", value: overview.workspaceMode, secondary: overview.rootPath },
+    { label: "Workspace", value: overview.workspaceMode, secondary: overview.rootPath, tier: "hero" },
     { label: "Lock State", value: overview.lockMode, secondary: overview.health },
     { label: "Storage Footprint", value: `${overview.segmentCount} segments`, secondary: `Active segment ${overview.activeSegmentID}` },
     { label: "Replay Progress", value: `${overview.lastAckedWriteSeq}`, secondary: `Next write seq ${overview.nextWriteSeq}` },
@@ -781,6 +782,9 @@ function buildFallbackCursorDetail(cursor: CursorRow): CursorDetailVM {
 }
 
 function startOperation(operation: OperationKey, set: typeof useAppStore.setState, get: typeof useAppStore.getState) {
+  if (operationBlocked(operation, get())) {
+    return;
+  }
   if (hasBindings()) {
     void startBoundOperation(operation, set, get);
     return;
@@ -830,6 +834,9 @@ function startOperation(operation: OperationKey, set: typeof useAppStore.setStat
 }
 
 async function startBoundOperation(operation: OperationKey, set: typeof useAppStore.setState, get: typeof useAppStore.getState) {
+  if (operationBlocked(operation, get())) {
+    return;
+  }
   try {
     switch (operation) {
       case "verify": {
@@ -872,6 +879,22 @@ async function startBoundOperation(operation: OperationKey, set: typeof useAppSt
       },
     });
   }
+}
+
+function operationBlocked(operation: OperationKey, state: ShellState) {
+  const workspace = state.workspace;
+  if (!workspace || workspace.mode === "InvalidWorkspace" || workspace.mode === "DegradedReadOnly") {
+    return true;
+  }
+  if (operation === "repair-tail" || operation === "shutdown") {
+    if (workspace.stale || workspace.mode !== "HealthyMaintenance" || workspace.lockMode !== "MaintenanceExclusive") {
+      return true;
+    }
+  }
+  if (operation === "repair-tail" && !state.selectedSegment) {
+    return true;
+  }
+  return false;
 }
 
 function finishOperation(

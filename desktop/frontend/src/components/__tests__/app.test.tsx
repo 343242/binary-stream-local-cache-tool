@@ -4,6 +4,7 @@ import App from "../../App";
 import EmptyState from "../EmptyState";
 import LoadingSkeleton from "../LoadingSkeleton";
 import StatusCard from "../StatusCard";
+import LandingPage from "../../pages/LandingPage";
 import { createInitialState, useAppStore } from "../../state/app-store";
 import styles from "../../styles/shell.module.css";
 
@@ -24,6 +25,7 @@ describe("desktop app pages", () => {
     render(<App />);
     expect(screen.getByText("Open Cache Directory")).toBeInTheDocument();
     expect(screen.getByText("Recent Directories")).toBeInTheDocument();
+    expect(screen.getByText(/supported workspace/i)).toBeInTheDocument();
   });
 
   it("renders workspace status inside the primary workspace rail", () => {
@@ -71,6 +73,7 @@ describe("desktop app pages", () => {
     expect(screen.getByText("Workspace")).toBeInTheDocument();
     expect(screen.getByText("HealthyObserver")).toBeInTheDocument();
     expect(screen.getByText("Recent Segments")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-metric-lead")).toBeInTheDocument();
   });
 
   it("renders overview as a narrative page with approved hero, warnings, and activity regions", () => {
@@ -194,6 +197,96 @@ describe("desktop app pages", () => {
     expect(screen.getByText("/srv/cache/replica-west")).toBeInTheDocument();
   });
 
+  test("invalid workspace recovery reopens the chooser instead of auto-reopening a recent path", () => {
+    const onOpenWorkspace = vi.fn();
+
+    render(
+      <LandingPage
+        recentWorkspaces={["/var/lib/binary-stream/cache-alpha"]}
+        invalidWorkspace={{ path: "/tmp/bad-root", reason: "layout mismatch" }}
+        onOpenWorkspace={onOpenWorkspace}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose Another Directory" }));
+    expect(onOpenWorkspace).toHaveBeenCalledWith();
+  });
+
+  test("hydrated stale workspaces surface stale snapshot state in the shell", async () => {
+    window.go = {
+      backend: {
+        App: {
+          OpenWorkspace: vi.fn().mockResolvedValue({
+            rootPath: "/var/lib/binary-stream/cache-alpha",
+            mode: "HealthyMaintenance",
+            lockMode: "MaintenanceExclusive",
+            health: "ok",
+            canRefresh: true,
+            canRunVerify: true,
+            canRunCloseCheck: true,
+            canRunRepairTail: true,
+            canRunShutdown: true,
+            reason: "",
+          }),
+          GetRecentWorkspaces: vi.fn().mockResolvedValue([]),
+          GetWorkspaceState: vi.fn().mockResolvedValue({
+            rootPath: "/var/lib/binary-stream/cache-alpha",
+            mode: "HealthyMaintenance",
+            lockMode: "MaintenanceExclusive",
+            health: "ok",
+            canRefresh: true,
+            canRunVerify: true,
+            canRunCloseCheck: true,
+            canRunRepairTail: true,
+            canRunShutdown: true,
+            reason: "",
+          }),
+          GetOverview: vi.fn().mockResolvedValue({
+            rootPath: "/var/lib/binary-stream/cache-alpha",
+            workspaceMode: "HealthyMaintenance",
+            lockMode: "MaintenanceExclusive",
+            health: "ok",
+            segmentCount: 48,
+            activeSegmentID: 48,
+            activeSegmentSizeBytes: 134217728,
+            walSizeBytes: 32768,
+            nextWriteSeq: 12911,
+            retentionDays: 14,
+            checkpointsTotal: 96,
+            segmentFsyncTotal: 311,
+            lastAckedWriteSeq: 12441,
+            gracefulShutdownsTotal: 0,
+            ungracefulRecoveriesTotal: 0,
+            segmentTailRepairsTotal: 0,
+            backlogEstimateRecords: null,
+            backlogEstimateBytes: null,
+            warnings: [],
+            lastRefreshedAt: Date.now(),
+            isStale: true,
+          }),
+          ListSegments: vi.fn().mockResolvedValue({ items: [], page: 1, pageSize: 8, totalItems: 0, hasNext: false }),
+          ListCursors: vi.fn().mockResolvedValue([]),
+          GetConfig: vi.fn().mockResolvedValue({
+            segmentTargetSizeBytes: { displayName: "Segment Target Size", currentValue: "1", defaultValue: "1", allowedRange: "1", startupOnly: true },
+            segmentSlackSizeBytes: { displayName: "Segment Slack Size", currentValue: "1", defaultValue: "1", allowedRange: "1", startupOnly: true },
+            blockTargetSizeBytes: { displayName: "Block Target Size", currentValue: "1", defaultValue: "1", allowedRange: "1", startupOnly: true },
+            checkpointInterval: { displayName: "Checkpoint Interval", currentValue: "1s", defaultValue: "1s", allowedRange: "1s", startupOnly: true },
+            checkpointBytes: { displayName: "Checkpoint Bytes", currentValue: "1", defaultValue: "1", allowedRange: "1", startupOnly: true },
+            segmentFsyncInterval: { displayName: "Segment Fsync Interval", currentValue: "1s", defaultValue: "1s", allowedRange: "1s", startupOnly: true },
+            segmentFsyncBytes: { displayName: "Segment Fsync Bytes", currentValue: "1", defaultValue: "1", allowedRange: "1", startupOnly: true },
+            retentionDays: { displayName: "Retention Days", currentValue: "14", defaultValue: "14", allowedRange: "1-365", startupOnly: true },
+          }),
+        },
+      },
+    } as any;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("stale snapshot")).toBeInTheDocument();
+    });
+  });
+
   test("shows loading feedback while a workspace is hydrating", () => {
     resetStore({
       workspaceLoadState: "hydrating",
@@ -306,11 +399,14 @@ describe("editorial component boundaries", () => {
     render(
       <>
         <StatusCard label="Workspace" value="HealthyObserver" secondary="Observer mode" />
-        <StatusCard eyebrow="Overview" label="Warnings" value="1 warning" secondary="Backlog estimate unavailable" />
+        <StatusCard eyebrow="Overview" label="Warnings" value="1 warning" secondary="Backlog estimate unavailable" tier="hero" />
       </>,
     );
 
     expect(screen.queryByText("Inspection")).not.toBeInTheDocument();
     expect(screen.getByText("Overview")).toBeInTheDocument();
+    const cards = screen.getAllByRole("article");
+    expect(cards[0]).not.toHaveClass(styles.statusCardHero);
+    expect(cards[1]).toHaveClass(styles.statusCardHero);
   });
 });

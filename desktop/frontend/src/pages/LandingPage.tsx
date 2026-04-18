@@ -15,7 +15,7 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
         title="Not a Cache Workspace"
         message={`${invalidWorkspace.path} does not contain the expected cache layout. ${invalidWorkspace.reason}`}
         actionLabel="Choose Another Directory"
-        onAction={() => onOpenWorkspace(recentWorkspaces[0])}
+        onAction={() => onOpenWorkspace()}
       />
     );
   }
@@ -33,6 +33,15 @@ export default function LandingPage({ recentWorkspaces, invalidWorkspace, onOpen
           Open Cache Directory
         </button>
       </div>
+      <section className={`${styles.panel} ${styles.panelPadding}`}>
+        <div className={styles.pageStack}>
+          <p className={styles.eyebrow}>Supported workspace</p>
+          <h3 className={styles.sectionTitle}>What this shell can open</h3>
+          <p className={styles.emptyCopy}>
+            Open a cache root that contains the expected segment, WAL, cursor, and checkpoint layout. Unsupported roots stay on the landing desk so you can choose another directory safely.
+          </p>
+        </div>
+      </section>
       <section className={styles.pageStack}>
         <div className={styles.sectionHeader}>
           <div className={styles.pageStack}>
