@@ -14,13 +14,17 @@ export default function ToastRegion({ toasts, onDismiss }: ToastRegionProps) {
   return (
     <aside className={styles.toastRegion} aria-label="Notifications">
       {toasts.slice(-3).map((toast) => (
-        <article key={toast.id} className={`${styles.toast} ${styles[`toast${capitalize(toast.level)}`]}`}>
+        <article
+          key={toast.id}
+          className={`${styles.toast} ${styles[`toast${capitalize(toast.level)}`]}`}
+        >
           <div className={styles.sectionHeader}>
             <strong>{toast.title}</strong>
             <button className={styles.toastDismiss} onClick={() => onDismiss(toast.id)} type="button">
               Dismiss
             </button>
           </div>
+          <p className={styles.eyebrow}>{toast.level === "info" ? "Desk notice" : toast.level === "success" ? "Completed action" : "Audit notice"}</p>
           <p className={styles.emptyCopy}>{toast.message}</p>
           <p className={styles.cardLabel}>
             {toast.level} · {toast.durationLabel}

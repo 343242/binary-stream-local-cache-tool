@@ -31,7 +31,9 @@ describe("operations page", () => {
 
   test("verify result with repairable corruption exposes Open Repair action", async () => {
     render(<App />);
-    fireEvent.click(screen.getByText("Run Verify"));
+    act(() => {
+      fireEvent.click(screen.getByText("Run Verify"));
+    });
     act(() => {
       vi.runAllTimers();
     });
@@ -42,9 +44,14 @@ describe("operations page", () => {
     const initial = createInitialState();
     setOperationState({ selectedOperation: "repair-tail", selectedSegment: initial.recentSegments[0] });
     render(<App />);
-    fireEvent.click(screen.getByText("Run Repair-tail"));
-    expect(screen.getByText("Confirm Repair Tail")).toBeInTheDocument();
-    expect(screen.getAllByText("danger").length).toBeGreaterThan(0);
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Review impact" }));
+    });
+    expect(screen.getByRole("dialog", { name: "Impact review: Repair-tail" })).toBeInTheDocument();
+    expect(screen.getByText("Impact review")).toBeInTheDocument();
+    expect(screen.getByText("This action is still blocked until you review the maintenance impact.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Selected segment/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Authorize Repair Tail" })).toBeInTheDocument();
   });
 
   test("toasts render warning and error durations correctly", () => {
@@ -61,12 +68,17 @@ describe("operations page", () => {
 
   test("task panel updates from started to finished", async () => {
     render(<App />);
-    fireEvent.click(screen.getByText("Run Verify"));
-    expect(screen.getByText("running")).toBeInTheDocument();
+    act(() => {
+      fireEvent.click(screen.getByText("Run Verify"));
+    });
+    expect(screen.getByRole("heading", { name: "Task timeline" })).toBeInTheDocument();
+    expect(screen.getByText("Requested")).toBeInTheDocument();
+    expect(screen.getByText("In progress")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Latest result" })).toBeInTheDocument();
     act(() => {
       vi.runAllTimers();
     });
-    expect(screen.getByText("succeeded")).toBeInTheDocument();
+    expect(screen.getByText("Completed")).toBeInTheDocument();
   });
 
   test("task panel renders progress metadata and cancel action", () => {
@@ -87,8 +99,20 @@ describe("operations page", () => {
       },
     });
     render(<App />);
-    expect(screen.getByText("Task timeline")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Task timeline" })).toBeInTheDocument();
     expect(screen.getByText("1 / 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel Task" })).toBeInTheDocument();
+  });
+
+  test("repair-tail stays visibly blocked before the confirm gate can open", () => {
+    setOperationState({
+      selectedOperation: "repair-tail",
+      selectedSegment: null,
+    });
+    render(<App />);
+    expect(screen.getByText("Blocked before confirmation")).toBeInTheDocument();
+    expect(screen.getByText("Select a repair candidate from Explorer or from the latest verify result before the confirm gate can open.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run Repair-tail" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

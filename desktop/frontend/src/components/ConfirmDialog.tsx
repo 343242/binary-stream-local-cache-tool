@@ -14,7 +14,8 @@ export default function ConfirmDialog({ dialog, onConfirm, onCancel }: ConfirmDi
 
   return (
     <div className={styles.dialogBackdrop} role="presentation">
-      <div className={styles.dialog} aria-modal="true" role="dialog">
+      <div className={styles.dialog} aria-label={`Impact review: ${dialog.title}`} aria-modal="true" role="dialog">
+        <p className={styles.eyebrow}>Impact review</p>
         <div className={styles.sectionHeader}>
           <h3 className={styles.sectionTitle}>{dialog.title}</h3>
           <span className={`${styles.badge} ${dialog.riskLevel === "danger" ? styles.dangerBadge : ""}`}>
@@ -27,6 +28,7 @@ export default function ConfirmDialog({ dialog, onConfirm, onCancel }: ConfirmDi
             <li key={line}>{line}</li>
           ))}
         </ul>
+        <p className={styles.dialogNote}>Review the impact and maintenance posture before you authorise the action.</p>
         <div className={styles.dialogActions}>
           <button className={`${styles.secondaryButton} ${styles.focusable}`} onClick={onCancel} type="button">
             {dialog.cancelLabel}

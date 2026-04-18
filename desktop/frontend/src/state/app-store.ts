@@ -347,20 +347,25 @@ export const useAppStore = create<ShellState>((set, get) => ({
   },
   requestOperation: (operation) => {
     if (operation === "repair-tail" || operation === "shutdown") {
+      const selectedSegmentID = get().selectedSegment?.segmentID;
       set({
         confirmDialog: {
           operation,
-          title: operation === "repair-tail" ? "Confirm Repair Tail" : "Confirm Shutdown",
+          title: operation === "repair-tail" ? "Repair-tail" : "Shutdown",
           riskLevel: "danger",
           summary:
             operation === "repair-tail"
-              ? "Repairing a segment tail will mutate on-disk workspace state."
-              : "Shutdown is a high-risk maintenance action.",
+              ? "This action is still blocked until you review the maintenance impact."
+              : "This action is still blocked until you review the shutdown impact.",
           impactLines:
             operation === "repair-tail"
-              ? ["Requires MaintenanceExclusive lock", "May rewrite truncated segment tail"]
-              : ["Requires MaintenanceExclusive lock", "Cannot be cancelled after confirmation"],
-          confirmLabel: operation === "repair-tail" ? "Run Repair Tail" : "Run Shutdown",
+              ? [
+                  "Requires MaintenanceExclusive lock",
+                  "May rewrite a truncated segment tail",
+                  selectedSegmentID ? `Selected segment ${selectedSegmentID}` : "Selected segment unavailable",
+                ]
+              : ["Requires MaintenanceExclusive lock", "Cannot be cancelled after confirmation", "Selected operation affects the whole workspace"],
+          confirmLabel: operation === "repair-tail" ? "Authorize Repair Tail" : "Authorize Shutdown",
           cancelLabel: "Cancel",
         },
       });

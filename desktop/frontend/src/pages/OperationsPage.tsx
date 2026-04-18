@@ -52,55 +52,140 @@ export default function OperationsPage({
   onDismissToast,
 }: OperationsPageProps) {
   const operation = operations.find((item) => item.key === selectedOperation) ?? operations[0];
-  const blocked =
-    (operation.maintenanceRequired && workspace?.mode !== "HealthyMaintenance") ||
-    (operation.key === "repair-tail" && !selectedSegmentID);
+  const needsMaintenance = operation.maintenanceRequired && workspace?.mode !== "HealthyMaintenance";
+  const needsSegment = operation.key === "repair-tail" && !selectedSegmentID;
+  const blocked = needsMaintenance || needsSegment;
+  const preconditions = [
+    {
+      label: "workspace posture",
+      value: workspace?.mode === "HealthyMaintenance" ? "maintenance ready" : workspace?.mode ?? "no workspace",
+      met: workspace?.mode === "HealthyMaintenance" || !operation.maintenanceRequired,
+    },
+    {
+      label: "lock posture",
+      value: workspace?.lockMode ?? "N/A",
+      met: workspace?.lockMode === "MaintenanceExclusive" || !operation.maintenanceRequired,
+    },
+    {
+      label: "snapshot",
+      value: workspace?.stale ? "stale snapshot" : "fresh snapshot",
+      met: !workspace?.stale,
+    },
+    {
+      label: "repair target",
+      value: selectedSegmentID ? `segment ${selectedSegmentID}` : "select a segment",
+      met: operation.key !== "repair-tail" || Boolean(selectedSegmentID),
+    },
+  ];
+  const impactLines =
+    operation.key === "repair-tail"
+      ? [
+          "May truncate a damaged tail region to restore read consistency.",
+          "Emits an auditable operation result and task lifecycle trail.",
+          selectedSegmentID ? `Selected segment ${selectedSegmentID} will be passed to the backend operation.` : "A repair candidate must be selected before the confirm gate can open.",
+        ]
+      : operation.key === "shutdown"
+        ? [
+            "Requests a guarded stop through the backend shutdown flow.",
+            "Emits an auditable operation result and task lifecycle trail.",
+            "Requires maintenance posture before the confirm gate can open.",
+          ]
+        : [
+            "Keeps the workspace read-only throughout the request.",
+            "Emits an auditable operation result and task lifecycle trail.",
+            "Leaves the latest result surface separate from the running task timeline.",
+          ];
+  const destructive = operation.maintenanceRequired;
+  const actionLabel = destructive ? "Review impact" : `Run ${operation.title}`;
 
   return (
     <div className={styles.pageStack}>
       <div className={styles.operationsLayout}>
-        <section className={styles.pageStack}>
-          {operations.map((item) => (
-            <button
-              key={item.key}
-              className={`${styles.operationCard} ${selectedOperation === item.key ? styles.operationCardActive : ""}`}
-              onClick={() => onSelectOperation(item.key)}
-              type="button"
-            >
-              <strong>{item.title}</strong>
-              <span>{item.description}</span>
-            </button>
-          ))}
+        <section className={`${styles.panel} ${styles.panelPadding} ${styles.operationRail}`}>
+          <p className={styles.eyebrow}>Action desk</p>
+          <div className={styles.pageStack}>
+            <div className={styles.pageStack}>
+              <span className={styles.summaryLabel}>Read-only actions</span>
+              {operations.filter((item) => !item.maintenanceRequired).map((item) => (
+                <button
+                  key={item.key}
+                  className={`${styles.operationCard} ${selectedOperation === item.key ? styles.operationCardActive : ""}`}
+                  onClick={() => onSelectOperation(item.key)}
+                  type="button"
+                >
+                  <strong>{item.title}</strong>
+                  <span>{item.description}</span>
+                </button>
+              ))}
+            </div>
+            <div className={styles.pageStack}>
+              <span className={styles.summaryLabel}>Destructive maintenance actions</span>
+              {operations.filter((item) => item.maintenanceRequired).map((item) => (
+                <button
+                  key={item.key}
+                  className={`${styles.operationCard} ${selectedOperation === item.key ? styles.operationCardActive : ""}`}
+                  onClick={() => onSelectOperation(item.key)}
+                  type="button"
+                >
+                  <strong>{item.title}</strong>
+                  <span>{item.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className={styles.pageStack}>
-          <section className={`${styles.panel} ${styles.panelPadding}`}>
+          <section className={`${styles.panel} ${styles.panelPadding} ${destructive ? styles.operationHeroDanger : styles.operationHero}`}>
+            <p className={styles.eyebrow}>{destructive ? "Destructive maintenance action" : "Read-only inspection action"}</p>
             <div className={styles.sectionHeader}>
               <h3 className={styles.sectionTitle}>{operation.title}</h3>
               {operation.maintenanceRequired ? <span className={`${styles.badge} ${styles.dangerBadge}`}>danger</span> : null}
             </div>
             <p className={styles.emptyCopy}>{operation.description}</p>
+            <div className={styles.preconditionList}>
+              {preconditions.map((item) => (
+                <div key={item.label} className={`${styles.preconditionChip} ${item.met ? styles.preconditionChipMet : styles.preconditionChipBlocked}`}>
+                  <span className={styles.fieldKey}>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+            <div className={styles.operationImpactBlock}>
+              <h4 className={styles.operationSubheading}>Impact preview</h4>
+              <ul className={styles.dialogList}>
+                {impactLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
             {blocked ? (
-              <p className={styles.emptyCopy}>
-                {operation.key === "repair-tail" && !selectedSegmentID
-                  ? "Select a segment from Explorer or use Open Repair from a verify result before running repair-tail."
-                  : "This action is blocked until the workspace holds MaintenanceExclusive."}
-              </p>
+              <div className={styles.operationBlockedPanel}>
+                <h4 className={styles.operationSubheading}>Blocked before confirmation</h4>
+                <p className={styles.emptyCopy}>
+                  {needsSegment
+                    ? "Select a repair candidate from Explorer or from the latest verify result before the confirm gate can open."
+                    : "This action is blocked until the workspace holds MaintenanceExclusive and reaches maintenance posture."}
+                </p>
+              </div>
             ) : (
-              <button className={`${styles.primaryButton} ${styles.focusable}`} onClick={() => onRunOperation(operation.key)} type="button">
-                Run {operation.title}
-              </button>
+              <div className={styles.operationActionRow}>
+                <button className={`${styles.primaryButton} ${styles.focusable}`} onClick={() => onRunOperation(operation.key)} type="button">
+                  {actionLabel}
+                </button>
+              </div>
             )}
           </section>
 
           <TaskPanel task={currentTask} onCancel={onCancelTask} />
 
           <section className={`${styles.panel} ${styles.panelPadding}`}>
+            <p className={styles.eyebrow}>Latest result</p>
             <div className={styles.sectionHeader}>
-              <h3 className={styles.sectionTitle}>Latest Result</h3>
+              <h3 className={styles.sectionTitle}>Latest result</h3>
             </div>
             {!latestResult ? (
-              <p className={styles.emptyCopy}>No Operations Run Yet</p>
+              <p className={styles.emptyCopy}>No operation result has been recorded yet.</p>
             ) : (
               <div className={styles.fieldList}>
                 <p className={styles.emptyCopy}>{latestResult.summary}</p>

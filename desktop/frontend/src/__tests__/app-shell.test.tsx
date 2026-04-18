@@ -13,3 +13,10 @@ test("renders the editorial shell landmarks", () => {
   expect(screen.getByRole("banner")).toBeInTheDocument();
   expect(screen.getByRole("main")).toBeInTheDocument();
 });
+
+test("keeps the shell readable at narrow desktop widths", () => {
+  window.innerWidth = 1180;
+  render(<App />);
+  expect(screen.getByRole("main")).toBeInTheDocument();
+  expect(screen.getByRole("complementary", { name: /primary workspace/i })).toBeInTheDocument();
+});

@@ -354,6 +354,10 @@
   gap: 16px;
 }
 
+.operationRail {
+  align-content: start;
+}
+
 .operationCard {
   display: grid;
   gap: 8px;
@@ -369,6 +373,69 @@
 .operationCardActive {
   border-color: rgba(14, 116, 144, 0.28);
   background: rgba(14, 116, 144, 0.1);
+}
+
+.operationHero {
+  display: grid;
+  gap: 18px;
+}
+
+.operationHeroDanger {
+  display: grid;
+  gap: 18px;
+  background: rgba(115, 45, 24, 0.08);
+  border-color: rgba(157, 36, 21, 0.18);
+}
+
+.preconditionList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.preconditionChip {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.preconditionChipMet {
+  border-color: rgba(31, 122, 76, 0.22);
+}
+
+.preconditionChipBlocked {
+  border-color: rgba(157, 36, 21, 0.24);
+  background: rgba(157, 36, 21, 0.06);
+}
+
+.operationImpactBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.operationSubheading {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.operationBlockedPanel {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(157, 36, 21, 0.24);
+  background: rgba(157, 36, 21, 0.06);
+}
+
+.operationActionRow {
+  display: flex;
+  justify-content: flex-start;
 }
 
 .configTableWrapper {
@@ -414,6 +481,12 @@
   color: var(--text-secondary);
 }
 
+.dialogNote {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+}
+
 .dialogActions {
   display: flex;
   justify-content: space-between;
@@ -439,10 +512,12 @@
 
 .toastWarning {
   border-color: rgba(184, 106, 0, 0.35);
+  background: rgba(255, 248, 239, 0.96);
 }
 
 .toastError {
   border-color: rgba(180, 35, 24, 0.35);
+  background: rgba(255, 244, 242, 0.98);
 }
 
 .toastSuccess {
@@ -459,6 +534,42 @@
 .dangerBadge {
   border-color: rgba(180, 35, 24, 0.3);
   color: #9d2415;
+}
+
+.timelineList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.timelineItem {
+  position: relative;
+  padding: 14px 16px 14px 28px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.timelineItem::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  left: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(107, 122, 138, 0.32);
+}
+
+.timelineItemActive {
+  border-color: rgba(14, 116, 144, 0.26);
+  background: rgba(14, 116, 144, 0.08);
+}
+
+.timelineItemActive::before {
+  background: rgba(14, 116, 144, 0.68);
 }
 
 .focusable:focus-visible,
@@ -494,11 +605,31 @@
     align-self: stretch;
   }
 
+  .topBar {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .badgeRow {
+    justify-content: flex-start;
+  }
+
   .explorerLayout {
     grid-template-columns: 1fr;
   }
 
   .operationsLayout {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1180px) {
+  .fieldRow {
+    grid-template-columns: 1fr;
+  }
+
+  .toastRegion {
+    position: static;
+    width: 100%;
   }
 }
