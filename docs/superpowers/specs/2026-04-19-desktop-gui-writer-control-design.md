@@ -84,6 +84,32 @@ Instead, the app directly executes the local actions:
 - inspect config/state/files
 - run maintenance tasks
 
+### 5.1 Record Ingestion Boundary
+
+The GUI does **not** call `WriteBatch` directly.
+
+`WriteBatch` must be invoked by an in-process writer host inside the Wails application:
+
+- `WriterHost`
+  - owns the active `StorageEngine`
+  - accepts records from the local acquisition/input adapter path
+  - calls `WriteBatch`
+  - emits coarse write events and lifecycle events to the desktop frontend
+
+The desktop frontend is responsible for:
+
+- start / stop intent
+- workspace choice
+- startup configuration
+- event display
+- alert display
+
+The desktop frontend is not responsible for:
+
+- constructing write batches
+- calling `WriteBatch` itself
+- pushing one UI event per input record
+
 ## 6. Information Architecture
 
 Primary navigation:
@@ -214,6 +240,23 @@ The feed does **not** attempt to render:
 
 That keeps the page aligned with current engine capabilities and avoids turning `Home` into a business-record console.
 
+The feed is **batch-oriented and lifecycle-oriented**, not record-oriented.
+
+Allowed event families:
+
+- workspace opened / initialized / switched
+- writer started / stopping / stopped
+- batch persisted
+- checkpoint advanced
+- warning raised
+- write failure raised
+
+Explicitly disallowed:
+
+- one frontend event per input record
+- raw payload echoing
+- sensor-field decoding in the `Home` feed
+
 ### 9.5 Home Alert Content
 
 Alerts and exceptions include:
@@ -331,6 +374,18 @@ It is **not**:
 - a remote service config editor
 - a live mutable runtime tuning panel for an external process
 
+### 13.3 Configuration Apply Timing
+
+Writer configuration is applied only when starting a new writer instance.
+
+Rules:
+
+- editing values in the modal does not mutate a running engine instance
+- confirming the modal updates the pending startup configuration
+- the next successful `Start Writing` action uses that configuration
+- a running writer continues with the configuration it was opened with
+- changing configuration while writing is active requires stop -> reconfigure -> start
+
 ## 14. Operations Page
 
 `Operations` remains the guarded maintenance surface.
@@ -364,8 +419,10 @@ The operator flow is:
    - initialize new workspace in selected directory
 4. review `Writer Config` modal
 5. confirm
-6. embedded Go backend opens/initializes the workspace and starts the local writer lifecycle
-7. `Home` log and status surfaces update
+6. embedded Go backend releases observer posture if held
+7. embedded Go backend opens/initializes the workspace and starts the local writer lifecycle through `WriterHost`
+8. `WriterHost` opens the engine and becomes the only in-process component allowed to call `WriteBatch`
+9. `Home` log and status surfaces update
 
 ### 15.2 Stop Writing
 
@@ -373,9 +430,11 @@ The operator flow is:
 
 1. click `Stop Writing`
 2. app triggers local stop/shutdown through the embedded backend
-3. state changes to `stopping`
-4. on success, state becomes `stopped`
-5. `Home` log records the outcome
+3. `WriterHost` stops accepting new records
+4. state changes to `stopping`
+5. on success, the engine closes and the app may reacquire observer posture for inspection
+6. state becomes `stopped`
+7. `Home` log records the outcome
 
 ### 15.3 Change Storage Location
 
@@ -397,6 +456,20 @@ Default recommendation:
 - initializing a new directory is the recommended primary path when starting fresh
 - opening an existing workspace remains supported for inspection or continuation
 
+### 15.5 Lock Transition Protocol
+
+The GUI redesign must respect the existing shared lock model.
+
+Required protocol:
+
+1. inspection flow opens a workspace in observer posture
+2. before starting the writer, the app releases the observer lock
+3. `WriterHost` opens the engine under `WriterExclusive`
+4. while the writer is active, the GUI reads state through in-process APIs and event streams instead of taking a second observer lock on the same workspace
+5. after stop, the app may reacquire observer posture for inspection pages
+
+The spec does not allow simultaneous in-process observer and writer locks on the same workspace without an explicit lock model change.
+
 ## 16. State Model
 
 The UI must distinguish two related but different state families.
@@ -409,7 +482,13 @@ The UI must distinguish two related but different state families.
 - `stopping`
 - `stopped`
 - `start-failed`
-- `stop-failed`
+
+`stop-failed` is not a stable lifecycle mode.
+
+If stop fails:
+
+- the failure is surfaced as an operation result and alert
+- the writer remains in its last confirmed lifecycle state until a later successful transition proves otherwise
 
 ### 16.2 Workspace State
 
@@ -447,9 +526,49 @@ New or expanded backend responsibilities include:
 - initialize workspace from GUI
 - start writer from GUI
 - stop writer from GUI
+- host the in-process `WriterHost`
+- connect a local acquisition/input adapter path to `WriterHost`
 - expose writer lifecycle state
 - expose a lightweight write-event feed
 - apply startup configuration from the modal
+
+### 18.1 Workspace Initialization
+
+`InitializeWorkspace(root)` must become a first-class backend capability.
+
+It must create the required workspace structure for a valid empty cache root:
+
+- `meta/`
+- `meta/replay/`
+- `segments/`
+- `wal/`
+
+After successful initialization, opening the workspace must return a valid inspection posture instead of `InvalidWorkspace`.
+
+### 18.2 Event Feed Contract
+
+The backend event feed must be coarse and rate-limited.
+
+Contract rules:
+
+- no per-record UI events
+- write success events are emitted per committed batch
+- checkpoint/fsync events are emitted only on meaningful transitions
+- repeated warning conditions should be deduplicated or throttled
+- the frontend maintains a bounded ring buffer for display
+
+The feed is for operator awareness, not audit-grade full replay history.
+
+### 18.3 Shutdown Contract
+
+`RunShutdown` must eventually become a true writer shutdown action, not a handoff placeholder.
+
+When the writer is active, shutdown behavior must:
+
+- stop new intake
+- close the active engine through the embedded backend
+- update lifecycle state
+- emit success or failure back to the UI
 
 These actions must be implemented in the embedded Go backend, not delegated to a daemon.
 
@@ -496,6 +615,10 @@ Manual and automated verification must cover:
 - editable vs disabled config fields render correctly
 - real-time write log updates
 - alert surface updates on write failures and workspace faults
+- lock transition from observer posture to writer posture and back
+- event-feed throttling / batching behavior under sustained write load
+- configuration changes only affecting the next writer start
+- shutdown invoking real writer close behavior instead of a placeholder response
 
 ## 21. Out Of Scope
 
@@ -524,6 +647,10 @@ This redesign is complete only if all of the following are true:
 - the GUI supports both opening an existing workspace and initializing a new workspace
 - changing storage location is blocked while writing is active
 - page copy consistently reflects local in-app execution rather than external service control
+- `WriteBatch` ownership is explicitly limited to the in-process `WriterHost` path
+- writer start/stop follows the lock transition protocol without conflicting observer/write locks
+- event-feed activity does not invalidate the write benchmark target through unbounded per-record UI emission
+- shutdown is implemented as a real embedded-writer lifecycle action
 
 ## 23. Supersession Notes
 
