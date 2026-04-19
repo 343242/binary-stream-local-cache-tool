@@ -110,6 +110,52 @@ The desktop frontend is not responsible for:
 - calling `WriteBatch` itself
 - pushing one UI event per input record
 
+### 5.2 `WriterHost` Contract
+
+`WriterHost` must be defined as an explicit backend contract, not only as prose.
+
+Go-like shape for planning purposes:
+
+```go
+type WriterStatus struct {
+    LifecycleState string
+    WorkspaceState string
+    RootPath       string
+    LastError      string
+    StartedAtUnixMs int64
+    StoppedAtUnixMs int64
+}
+
+type WriterHost interface {
+    Start(ctx context.Context, root string, cfg core.Config) error
+    Stop(ctx context.Context) error
+    Status() WriterStatus
+}
+```
+
+Rules:
+
+- `Start` owns engine open + workspace initialization/open + writer activation
+- `Stop` owns graceful writer shutdown
+- `Status` is the single backend truth for writer lifecycle posture exposed to the GUI
+
+### 5.3 Acquisition Adapter Boundary
+
+The local acquisition/input path must connect to `WriterHost` through an in-process adapter, not through a daemon protocol.
+
+Planning contract:
+
+- the acquisition adapter submits **batches** of `core.RawRecord`
+- `WriterHost` is the only component allowed to transform those batches into `WriteBatch` calls
+- transport is in-process only
+- first implementation should use a bounded in-memory queue/channel between adapter and `WriterHost`
+
+Backpressure rule:
+
+- the queue is bounded
+- when full, the producer blocks until capacity is available or the caller context expires
+- the first implementation does not introduce HTTP, RPC, or cross-process transport for ingestion
+
 ## 6. Information Architecture
 
 Primary navigation:
@@ -299,6 +345,16 @@ It answers:
 
 `Overview` is now where the heavier status story lives.
 
+### 10.2 Retention Semantics
+
+The `30 days` retention target remains a **soft lower-bound policy**, not a hard cap that may delete unacknowledged data.
+
+Inherited storage rule:
+
+- configured retention defines the minimum cleanup age target
+- unacknowledged data may force data to remain longer than the configured period
+- the GUI must present this as "retention target" or "retention horizon", not as a guaranteed hard deletion cutoff
+
 ## 11. Explorer Page
 
 `Explorer` remains the structural inspection page.
@@ -386,6 +442,11 @@ Rules:
 - a running writer continues with the configuration it was opened with
 - changing configuration while writing is active requires stop -> reconfigure -> start
 
+The modal must clearly distinguish:
+
+- effective config of the currently running writer
+- pending startup config for the next writer start
+
 ## 14. Operations Page
 
 `Operations` remains the guarded maintenance surface.
@@ -436,6 +497,12 @@ The operator flow is:
 6. state becomes `stopped`
 7. `Home` log records the outcome
 
+Stop timeout:
+
+- default stop timeout is `30s`
+- timeout expiration must surface a stop failure result and alert
+- timeout expiration must not silently report a successful stop
+
 ### 15.3 Change Storage Location
 
 Rules:
@@ -470,6 +537,17 @@ Required protocol:
 
 The spec does not allow simultaneous in-process observer and writer locks on the same workspace without an explicit lock model change.
 
+### 15.6 Rapid Start/Stop Protection
+
+The GUI must prevent rapid conflicting lifecycle actions.
+
+Rules:
+
+- `Start Writing` is disabled while state is `starting` or `stopping`
+- `Stop Writing` is disabled while state is `starting` or `stopping`
+- repeated clicks must not enqueue overlapping start/stop operations
+- lifecycle controls re-enable only after a confirmed terminal transition
+
 ## 16. State Model
 
 The UI must distinguish two related but different state families.
@@ -495,6 +573,7 @@ If stop fails:
 - `NoWorkspace`
 - `Opening`
 - `HealthyObserver`
+- `HealthyWriter`
 - `HealthyMaintenance`
 - `DegradedReadOnly`
 - `InvalidWorkspace`
@@ -503,6 +582,30 @@ Reason:
 
 - an operator needs to know whether the writer lifecycle succeeded
 - independently, they also need to know whether the workspace itself is structurally valid and safe
+
+### 16.3 Legal State Combinations
+
+Required legal combinations:
+
+- `(not-started | stopped | start-failed, NoWorkspace)`
+- `(not-started | stopped | start-failed, HealthyObserver)`
+- `(starting, Opening)`
+- `(running, HealthyWriter)`
+- `(stopping, HealthyWriter)`
+- `(not-started | stopped | start-failed, DegradedReadOnly)`
+- `(not-started | stopped | start-failed, InvalidWorkspace)`
+
+Explicitly illegal as stable states:
+
+- `(running, DegradedReadOnly)`
+- `(starting, InvalidWorkspace)`
+- `(running, HealthyObserver)`
+
+Runtime fault rule:
+
+- if a fatal write-path fault occurs while running, the writer must leave `running`
+- the UI may show an alert immediately
+- after the transition settles, the workspace may land in `DegradedReadOnly` if inspection remains possible
 
 ## 17. Page Gating
 
@@ -542,8 +645,18 @@ It must create the required workspace structure for a valid empty cache root:
 - `meta/replay/`
 - `segments/`
 - `wal/`
+- `tools/`
+- `tools/reports/`
 
 After successful initialization, opening the workspace must return a valid inspection posture instead of `InvalidWorkspace`.
+
+Initialization error semantics:
+
+- non-existent target path with writable parent: create the path and initialize
+- existing empty directory: initialize in place
+- existing valid workspace: return a typed "already initialized" result without destructive overwrite
+- existing partially initialized directory: fail with a typed partial-layout error
+- non-writable target path or parent: fail with permission/read-only error
 
 ### 18.2 Event Feed Contract
 
@@ -556,6 +669,9 @@ Contract rules:
 - checkpoint/fsync events are emitted only on meaningful transitions
 - repeated warning conditions should be deduplicated or throttled
 - the frontend maintains a bounded ring buffer for display
+- frontend ring buffer size: `200` entries
+- max feed emission rate to the frontend: `10` events/second
+- identical warning dedupe window: `5s`
 
 The feed is for operator awareness, not audit-grade full replay history.
 
@@ -569,6 +685,16 @@ When the writer is active, shutdown behavior must:
 - close the active engine through the embedded backend
 - update lifecycle state
 - emit success or failure back to the UI
+
+### 18.4 Crash-Recovery Signal
+
+The existing engine lifecycle marker must be reflected back into GUI posture.
+
+Required behavior:
+
+- if startup detects an ungraceful previous lifecycle, the GUI must surface a recovery warning
+- the app may still open the workspace if recovery succeeds
+- the warning must remain visible until the operator dismisses or refreshes away from that startup event
 
 These actions must be implemented in the embedded Go backend, not delegated to a daemon.
 
@@ -619,6 +745,8 @@ Manual and automated verification must cover:
 - event-feed throttling / batching behavior under sustained write load
 - configuration changes only affecting the next writer start
 - shutdown invoking real writer close behavior instead of a placeholder response
+- illegal lifecycle action suppression during rapid start/stop clicking
+- startup warning behavior after an ungraceful previous writer shutdown
 
 ## 21. Out Of Scope
 
@@ -651,6 +779,8 @@ This redesign is complete only if all of the following are true:
 - writer start/stop follows the lock transition protocol without conflicting observer/write locks
 - event-feed activity does not invalidate the write benchmark target through unbounded per-record UI emission
 - shutdown is implemented as a real embedded-writer lifecycle action
+- `WriterHost` is implemented behind an explicit backend interface rather than implicit helper logic
+- only legal writer-state/workspace-state combinations are reachable in steady state
 
 ## 23. Supersession Notes
 
@@ -666,3 +796,13 @@ Specifically, it changes:
 - the existence of an explicit writer-control flow
 - the presence of a writer-configuration modal
 - the treatment of live awareness on the landing page
+
+### 23.1 Authority Order
+
+For overlapping desktop-GUI topics, authority order is:
+
+1. `2026-04-19-desktop-gui-writer-control-design.md`
+2. `2026-04-17-desktop-frontend-editorial-hybrid-design.md`
+3. `2026-04-15-desktop-gui-design.md`
+
+The newer document overrides older ones only where their subjects overlap.
