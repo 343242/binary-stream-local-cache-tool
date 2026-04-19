@@ -10,10 +10,45 @@ import (
 	"time"
 
 	"fastReadFile/internal/codec"
+	"fastReadFile/internal/core"
+	"fastReadFile/internal/desktop/service"
+	"fastReadFile/internal/desktop/writer"
 	"fastReadFile/internal/segment"
 	"fastReadFile/internal/wal"
 	"fastReadFile/pkg/cache"
 )
+
+func TestWriterHostStartAndStop(t *testing.T) {
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+
+	host := writer.NewHost()
+	cfg := core.DefaultConfig(root)
+
+	if err := host.Start(context.Background(), root, cfg); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if got := host.Status().LifecycleState; got != string(writer.LifecycleRunning) {
+		t.Fatalf("LifecycleState = %q, want %q", got, writer.LifecycleRunning)
+	}
+	if err := host.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+func TestWriterHostSubmitBlocksWhenQueueFull(t *testing.T) {
+	host := writer.NewHostWithQueueCapacity(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	host.DebugFillQueueForTest()
+	err := host.Submit(ctx, []core.RawRecord{{EventTimeUnixMs: 1, Payload: []byte("x")}})
+	if err == nil {
+		t.Fatal("expected context expiration while queue is full")
+	}
+}
 
 func TestClosePersistsAckedCursorState(t *testing.T) {
 	root := t.TempDir()
