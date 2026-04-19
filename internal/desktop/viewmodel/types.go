@@ -13,6 +13,7 @@ type WorkspaceState struct {
 	Reason           string
 }
 
+// WriterStatus is the desktop-facing lifecycle snapshot for the in-process writer.
 type WriterStatus struct {
 	LifecycleState  string
 	WorkspaceState  string

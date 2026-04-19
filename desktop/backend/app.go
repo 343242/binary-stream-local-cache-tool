@@ -56,6 +56,18 @@ func (a *App) GetWorkspaceState() (viewmodel.WorkspaceState, error) {
 	return a.session.getWorkspaceState(), nil
 }
 
+func (a *App) StartWriter(rootPath string) error {
+	return a.session.startWriter(rootPath)
+}
+
+func (a *App) StopWriter(timeoutMs int) error {
+	return a.session.stopWriter(time.Duration(timeoutMs) * time.Millisecond)
+}
+
+func (a *App) GetWriterStatus() (viewmodel.WriterStatus, error) {
+	return a.session.getWriterStatus(), nil
+}
+
 func (a *App) AcquireMaintenanceLock() (viewmodel.WorkspaceState, error) {
 	return a.session.acquireMaintenanceLock()
 }

@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"fastReadFile/desktop/backend"
+	"fastReadFile/internal/desktop/service"
 	"fastReadFile/internal/desktop/writer"
+	"fastReadFile/internal/lock"
 )
 
 func TestDesktopBackend(t *testing.T) {
@@ -45,6 +47,88 @@ func TestTaskLifecycleEmitsStartedProgressFinished(t *testing.T) {
 
 func TestRecentWorkspacesPersistAndPruneMissingEntries(t *testing.T) {
 	runTestRecentWorkspacesPersistAndPruneMissingEntries(t)
+}
+
+func TestDesktopBackendStartWriterReleasesObserverLock(t *testing.T) {
+	t.Parallel()
+
+	app := backend.NewApp()
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.OpenWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := app.StartWriter(root); err != nil {
+		t.Fatalf("StartWriter() error = %v", err)
+	}
+	state, err := app.GetWorkspaceState()
+	if err != nil {
+		t.Fatalf("GetWorkspaceState() error = %v", err)
+	}
+	if state.Mode != "HealthyWriter" {
+		t.Fatalf("Mode = %q, want %q", state.Mode, "HealthyWriter")
+	}
+	if state.LockMode != string(lock.ModeWriterExclusive) {
+		t.Fatalf("LockMode = %q, want %q", state.LockMode, lock.ModeWriterExclusive)
+	}
+
+	status, err := app.GetWriterStatus()
+	if err != nil {
+		t.Fatalf("GetWriterStatus() error = %v", err)
+	}
+	if status.LifecycleState != "running" {
+		t.Fatalf("WriterStatus.LifecycleState = %q, want %q", status.LifecycleState, "running")
+	}
+	if status.WorkspaceState != "HealthyWriter" {
+		t.Fatalf("WriterStatus.WorkspaceState = %q, want %q", status.WorkspaceState, "HealthyWriter")
+	}
+}
+
+func TestDesktopBackendStopWriterRestoresObserverLock(t *testing.T) {
+	t.Parallel()
+
+	app := backend.NewApp()
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.OpenWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.StartWriter(root); err != nil {
+		t.Fatalf("StartWriter() error = %v", err)
+	}
+
+	if err := app.StopWriter(1000); err != nil {
+		t.Fatalf("StopWriter() error = %v", err)
+	}
+	state, err := app.GetWorkspaceState()
+	if err != nil {
+		t.Fatalf("GetWorkspaceState() error = %v", err)
+	}
+	if state.Mode != "HealthyObserver" {
+		t.Fatalf("Mode = %q, want %q", state.Mode, "HealthyObserver")
+	}
+	if state.LockMode != string(lock.ModeObserverShared) {
+		t.Fatalf("LockMode = %q, want %q", state.LockMode, lock.ModeObserverShared)
+	}
+
+	status, err := app.GetWriterStatus()
+	if err != nil {
+		t.Fatalf("GetWriterStatus() error = %v", err)
+	}
+	if status.LifecycleState != "stopped" {
+		t.Fatalf("WriterStatus.LifecycleState = %q, want %q", status.LifecycleState, "stopped")
+	}
+	if status.WorkspaceState != "HealthyObserver" {
+		t.Fatalf("WriterStatus.WorkspaceState = %q, want %q", status.WorkspaceState, "HealthyObserver")
+	}
+	if status.RootPath != root {
+		t.Fatalf("WriterStatus.RootPath = %q, want %q", status.RootPath, root)
+	}
 }
 
 func TestWriterEventsKeepOnlyLatestEntries(t *testing.T) {
