@@ -50,6 +50,80 @@ func TestWriterHostSubmitBlocksWhenQueueFull(t *testing.T) {
 	}
 }
 
+func TestWriterHostStopFailurePreservesStoppingLifecycle(t *testing.T) {
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+
+	host := writer.NewHost()
+	cfg := core.DefaultConfig(root)
+
+	if err := host.Start(context.Background(), root, cfg); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := host.Stop(ctx)
+	if err == nil {
+		t.Fatal("expected Stop() error from expired context")
+	}
+
+	status := host.Status()
+	if status.LifecycleState != string(writer.LifecycleStopping) {
+		t.Fatalf("LifecycleState = %q, want %q", status.LifecycleState, writer.LifecycleStopping)
+	}
+	if status.LastError == "" {
+		t.Fatal("LastError = empty, want shutdown failure recorded")
+	}
+
+	if err := host.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop(cleanup) error = %v", err)
+	}
+}
+
+func TestWriterHostStartResetsQueueAcrossRestarts(t *testing.T) {
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+
+	host := writer.NewHostWithQueueCapacity(1)
+	cfg := core.DefaultConfig(root)
+
+	host.DebugFillQueueForTest()
+	if got := host.DebugQueueLenForTest(); got != 1 {
+		t.Fatalf("queue len before first start = %d, want %d", got, 1)
+	}
+
+	if err := host.Start(context.Background(), root, cfg); err != nil {
+		t.Fatalf("Start(first) error = %v", err)
+	}
+	if got := host.DebugQueueLenForTest(); got != 0 {
+		t.Fatalf("queue len after first start = %d, want %d", got, 0)
+	}
+	if err := host.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop(first) error = %v", err)
+	}
+
+	host.DebugFillQueueForTest()
+	if got := host.DebugQueueLenForTest(); got != 1 {
+		t.Fatalf("queue len before restart = %d, want %d", got, 1)
+	}
+
+	if err := host.Start(context.Background(), root, cfg); err != nil {
+		t.Fatalf("Start(second) error = %v", err)
+	}
+	if got := host.DebugQueueLenForTest(); got != 0 {
+		t.Fatalf("queue len after restart = %d, want %d", got, 0)
+	}
+	if err := host.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop(second) error = %v", err)
+	}
+}
+
 func TestClosePersistsAckedCursorState(t *testing.T) {
 	root := t.TempDir()
 	cfg := cache.DefaultConfig(root)

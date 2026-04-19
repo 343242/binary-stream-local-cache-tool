@@ -29,12 +29,13 @@ type WriterHost interface {
 }
 
 type host struct {
-	mu       sync.RWMutex
-	engine   *cache.StorageEngine
-	status   WriterStatus
-	queue    chan []core.RawRecord
-	stopCh   chan struct{}
-	workerCh chan struct{}
+	mu            sync.RWMutex
+	engine        *cache.StorageEngine
+	status        WriterStatus
+	queue         chan []core.RawRecord
+	queueCapacity int
+	stopCh        chan struct{}
+	workerCh      chan struct{}
 }
 
 var _ WriterHost = (*host)(nil)
@@ -48,6 +49,7 @@ func NewHostWithQueueCapacity(capacity int) *host {
 		capacity = 1
 	}
 	return &host{
+		queueCapacity: capacity,
 		status: WriterStatus{
 			LifecycleState: string(LifecycleNotStarted),
 		},
@@ -63,6 +65,8 @@ func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 		h.mu.Unlock()
 		return errors.New("writer host already running")
 	}
+	queue := make(chan []core.RawRecord, h.queueCapacity)
+	h.queue = queue
 	h.status = WriterStatus{
 		LifecycleState: string(LifecycleStarting),
 		WorkspaceState: workspaceStateOpening,
@@ -101,7 +105,7 @@ func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 	}
 	h.mu.Unlock()
 
-	go h.runIngestionLoop(engine, stopCh, workerCh)
+	go h.runIngestionLoop(engine, queue, stopCh, workerCh)
 	return nil
 }
 
@@ -113,14 +117,18 @@ func (h *host) Stop(ctx context.Context) error {
 	stopCh := h.stopCh
 	workerCh := h.workerCh
 	root := h.status.RootPath
+	startedAtUnixMs := h.status.StartedAtUnixMs
 	if engine == nil {
 		h.status.LifecycleState = string(LifecycleStopped)
 		h.status.WorkspaceState = workspaceStateHealthyObserver
 		h.status.StoppedAtUnixMs = time.Now().UnixMilli()
+		h.queue = make(chan []core.RawRecord, h.queueCapacity)
 		h.mu.Unlock()
 		return nil
 	}
 	h.status.LifecycleState = string(LifecycleStopping)
+	h.stopCh = nil
+	h.workerCh = nil
 	h.mu.Unlock()
 
 	if stopCh != nil {
@@ -130,12 +138,14 @@ func (h *host) Stop(ctx context.Context) error {
 		select {
 		case <-workerCh:
 		case <-ctx.Done():
+			h.mu.Lock()
+			h.status.LastError = ctx.Err().Error()
+			h.mu.Unlock()
 			return ctx.Err()
 		}
 	}
 	if err := engine.Shutdown(ctx); err != nil {
 		h.mu.Lock()
-		h.status.LifecycleState = string(LifecycleStartFailed)
 		h.status.LastError = err.Error()
 		h.mu.Unlock()
 		return err
@@ -143,13 +153,12 @@ func (h *host) Stop(ctx context.Context) error {
 
 	h.mu.Lock()
 	h.engine = nil
-	h.stopCh = nil
-	h.workerCh = nil
+	h.queue = make(chan []core.RawRecord, h.queueCapacity)
 	h.status = WriterStatus{
 		LifecycleState:  string(LifecycleStopped),
 		WorkspaceState:  workspaceStateHealthyObserver,
 		RootPath:        root,
-		StartedAtUnixMs: h.status.StartedAtUnixMs,
+		StartedAtUnixMs: startedAtUnixMs,
 		StoppedAtUnixMs: time.Now().UnixMilli(),
 	}
 	h.mu.Unlock()
@@ -180,14 +189,20 @@ func (h *host) DebugFillQueueForTest() {
 	}
 }
 
-func (h *host) runIngestionLoop(engine *cache.StorageEngine, stopCh <-chan struct{}, workerCh chan<- struct{}) {
+func (h *host) DebugQueueLenForTest() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.queue)
+}
+
+func (h *host) runIngestionLoop(engine *cache.StorageEngine, queue <-chan []core.RawRecord, stopCh <-chan struct{}, workerCh chan<- struct{}) {
 	defer close(workerCh)
 
 	for {
 		select {
 		case <-stopCh:
 			return
-		case records := <-h.queue:
+		case records := <-queue:
 			if len(records) == 0 {
 				continue
 			}
