@@ -3,6 +3,7 @@ package unit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"fastReadFile/desktop/backend"
+	"fastReadFile/internal/desktop/writer"
 )
 
 func TestDesktopBackend(t *testing.T) {
@@ -43,6 +45,42 @@ func TestTaskLifecycleEmitsStartedProgressFinished(t *testing.T) {
 
 func TestRecentWorkspacesPersistAndPruneMissingEntries(t *testing.T) {
 	runTestRecentWorkspacesPersistAndPruneMissingEntries(t)
+}
+
+func TestWriterEventsKeepOnlyLatestEntries(t *testing.T) {
+	feed := writer.NewEventFeed(3, 10, 5*time.Second)
+	for i := 0; i < 5; i++ {
+		feed.Emit(writer.Event{Kind: "batch-persisted", Message: fmt.Sprintf("batch-%d", i)})
+	}
+
+	events := feed.Snapshot()
+	if len(events) != 3 {
+		t.Fatalf("len(events) = %d, want 3", len(events))
+	}
+	if events[0].Message != "batch-2" {
+		t.Fatalf("oldest kept event = %q, want batch-2", events[0].Message)
+	}
+	if events[2].Message != "batch-4" {
+		t.Fatalf("latest kept event = %q, want batch-4", events[2].Message)
+	}
+}
+
+func TestWriterEventsThrottleBurstEmissions(t *testing.T) {
+	feed := writer.NewEventFeed(10, 2, 5*time.Second)
+	for i := 0; i < 5; i++ {
+		feed.Emit(writer.Event{Kind: "batch-persisted", Message: fmt.Sprintf("batch-%d", i)})
+	}
+
+	events := feed.Snapshot()
+	if len(events) != 2 {
+		t.Fatalf("len(events) = %d, want 2", len(events))
+	}
+	if events[0].Message != "batch-0" {
+		t.Fatalf("events[0].Message = %q, want batch-0", events[0].Message)
+	}
+	if events[1].Message != "batch-1" {
+		t.Fatalf("events[1].Message = %q, want batch-1", events[1].Message)
+	}
 }
 
 func runTestOpenWorkspaceAndCloseWorkspaceAreSerialized(t *testing.T) {

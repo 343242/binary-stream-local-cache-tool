@@ -25,6 +25,7 @@ type WriterHost interface {
 	Start(ctx context.Context, root string, cfg core.Config) error
 	Stop(ctx context.Context) error
 	Status() WriterStatus
+	Events() []Event
 	Submit(ctx context.Context, records []core.RawRecord) error
 }
 
@@ -32,6 +33,7 @@ type host struct {
 	mu            sync.RWMutex
 	engine        *cache.StorageEngine
 	status        WriterStatus
+	events        *EventFeed
 	queue         chan []core.RawRecord
 	queueCapacity int
 	stopCh        chan struct{}
@@ -50,6 +52,11 @@ func NewHostWithQueueCapacity(capacity int) *host {
 	}
 	return &host{
 		queueCapacity: capacity,
+		events: NewEventFeed(
+			EventBufferSize,
+			EventRateLimitPerSec,
+			time.Duration(WarningDedupeWindowMs)*time.Millisecond,
+		),
 		status: WriterStatus{
 			LifecycleState: string(LifecycleNotStarted),
 		},
@@ -106,6 +113,10 @@ func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 	h.mu.Unlock()
 
 	go h.runIngestionLoop(engine, queue, stopCh, workerCh)
+	h.events.Emit(Event{
+		Kind:    "writer-started",
+		Message: fmt.Sprintf("Writer started for %s", root),
+	})
 	return nil
 }
 
@@ -141,6 +152,10 @@ func (h *host) Stop(ctx context.Context) error {
 			h.mu.Lock()
 			h.status.LastError = ctx.Err().Error()
 			h.mu.Unlock()
+			h.events.Emit(Event{
+				Kind:    "writer-stop-warning",
+				Message: fmt.Sprintf("Writer stop interrupted: %v", ctx.Err()),
+			})
 			return ctx.Err()
 		}
 	}
@@ -148,6 +163,10 @@ func (h *host) Stop(ctx context.Context) error {
 		h.mu.Lock()
 		h.status.LastError = err.Error()
 		h.mu.Unlock()
+		h.events.Emit(Event{
+			Kind:    "writer-stop-warning",
+			Message: fmt.Sprintf("Writer shutdown failed: %v", err),
+		})
 		return err
 	}
 
@@ -162,6 +181,10 @@ func (h *host) Stop(ctx context.Context) error {
 		StoppedAtUnixMs: time.Now().UnixMilli(),
 	}
 	h.mu.Unlock()
+	h.events.Emit(Event{
+		Kind:    "writer-stopped",
+		Message: fmt.Sprintf("Writer stopped for %s", root),
+	})
 	return nil
 }
 
@@ -169,6 +192,10 @@ func (h *host) Status() WriterStatus {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.status
+}
+
+func (h *host) Events() []Event {
+	return h.events.Snapshot()
 }
 
 func (h *host) Submit(ctx context.Context, records []core.RawRecord) error {
@@ -206,11 +233,21 @@ func (h *host) runIngestionLoop(engine *cache.StorageEngine, queue <-chan []core
 			if len(records) == 0 {
 				continue
 			}
-			if _, err := engine.WriteBatch(context.Background(), records); err != nil {
+			result, err := engine.WriteBatch(context.Background(), records)
+			if err != nil {
 				h.mu.Lock()
 				h.status.LastError = fmt.Sprintf("write batch failed: %v", err)
 				h.mu.Unlock()
+				h.events.Emit(Event{
+					Kind:    "write-warning",
+					Message: fmt.Sprintf("Write batch failed: %v", err),
+				})
+				continue
 			}
+			h.events.Emit(Event{
+				Kind:    "batch-persisted",
+				Message: fmt.Sprintf("Persisted batch %d (%d records)", result.BatchSeq, result.RecordCount),
+			})
 		}
 	}
 }
@@ -223,6 +260,10 @@ func (h *host) failStart(root string, err error) {
 		RootPath:       root,
 		LastError:      err.Error(),
 	}
+	h.events.Emit(Event{
+		Kind:    "writer-start-failed",
+		Message: err.Error(),
+	})
 }
 
 func normalizeContext(ctx context.Context) context.Context {

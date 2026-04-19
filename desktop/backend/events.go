@@ -3,10 +3,12 @@ package backend
 import "sync"
 
 const (
-	EventTaskStarted    = "task:started"
-	EventTaskProgress   = "task:progress"
-	EventTaskFinished   = "task:finished"
-	EventWorkspaceChanged = "workspace:changed"
+	EventTaskStarted         = "task:started"
+	EventTaskProgress        = "task:progress"
+	EventTaskFinished        = "task:finished"
+	EventWorkspaceChanged    = "workspace:changed"
+	EventWriterStatusChanged = "writer:status-changed"
+	EventWriterEventsChanged = "writer:events-changed"
 )
 
 type EventEmitter func(name string, payload any)
