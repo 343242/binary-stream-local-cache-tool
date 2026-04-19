@@ -43,6 +43,12 @@ func InitializeWorkspace(root string) error {
 			Path: root,
 		}
 	}
+	if layoutState == workspaceLayoutInvalidRoot {
+		return &WorkspaceInitError{
+			Code: WorkspaceInitInvalidRoot,
+			Path: root,
+		}
+	}
 	if layoutState == workspaceLayoutValid {
 		return nil
 	}
@@ -70,6 +76,7 @@ const (
 	workspaceLayoutMissing workspaceLayoutState = iota
 	workspaceLayoutEmpty
 	workspaceLayoutValid
+	workspaceLayoutInvalidRoot
 	workspaceLayoutPartial
 )
 
@@ -82,7 +89,7 @@ func detectWorkspaceLayout(root string) (workspaceLayoutState, error) {
 		return workspaceLayoutMissing, err
 	}
 	if !info.IsDir() {
-		return workspaceLayoutPartial, fmt.Errorf("workspace root is not a directory: %s", root)
+		return workspaceLayoutInvalidRoot, nil
 	}
 
 	entryNames, err := existingEntries(root)
