@@ -13,6 +13,15 @@ type WorkspaceState struct {
 	Reason           string
 }
 
+type WriterStatus struct {
+	LifecycleState  string
+	WorkspaceState  string
+	RootPath        string
+	LastError       string
+	StartedAtUnixMs int64
+	StoppedAtUnixMs int64
+}
+
 type Overview struct {
 	RootPath                  string
 	WorkspaceMode             string

@@ -2,6 +2,9 @@ package unit
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +16,8 @@ func TestDesktopService(t *testing.T) {
 	t.Run("TestOpenWorkspaceReturnsInvalidWorkspaceForEmptyDirectory", runTestOpenWorkspaceReturnsInvalidWorkspaceForEmptyDirectory)
 	t.Run("TestGetOverviewUsesWarningsForUnavailableWorkspaceStatusFields", runTestGetOverviewUsesWarningsForUnavailableWorkspaceStatusFields)
 	t.Run("TestGetConfigIncludesPhaseOneValidationRanges", runTestGetConfigIncludesPhaseOneValidationRanges)
+	t.Run("TestInitializeWorkspaceCreatesRequiredLayout", runTestInitializeWorkspaceCreatesRequiredLayout)
+	t.Run("TestInitializeWorkspaceRejectsPartialLayout", runTestInitializeWorkspaceRejectsPartialLayout)
 }
 
 func TestOpenWorkspaceReturnsInvalidWorkspaceForEmptyDirectory(t *testing.T) {
@@ -25,6 +30,14 @@ func TestGetOverviewUsesWarningsForUnavailableWorkspaceStatusFields(t *testing.T
 
 func TestGetConfigIncludesPhaseOneValidationRanges(t *testing.T) {
 	runTestGetConfigIncludesPhaseOneValidationRanges(t)
+}
+
+func TestInitializeWorkspaceCreatesRequiredLayout(t *testing.T) {
+	runTestInitializeWorkspaceCreatesRequiredLayout(t)
+}
+
+func TestInitializeWorkspaceRejectsPartialLayout(t *testing.T) {
+	runTestInitializeWorkspaceRejectsPartialLayout(t)
 }
 
 func runTestOpenWorkspaceReturnsInvalidWorkspaceForEmptyDirectory(t *testing.T) {
@@ -112,5 +125,52 @@ func runTestGetConfigIncludesPhaseOneValidationRanges(t *testing.T) {
 	}
 	if !cfg.RootDir.StartupOnly {
 		t.Fatalf("RootDir.StartupOnly = false, want true")
+	}
+}
+
+func runTestInitializeWorkspaceCreatesRequiredLayout(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "cache-root")
+
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatalf("InitializeWorkspace() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		"meta",
+		"meta/replay",
+		"segments",
+		"wal",
+		"tools",
+		"tools/reports",
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Fatalf("expected %s to exist: %v", rel, err)
+		}
+	}
+}
+
+func runTestInitializeWorkspaceRejectsPartialLayout(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "meta"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := service.InitializeWorkspace(root)
+	if err == nil {
+		t.Fatal("expected partial-layout error")
+	}
+
+	var initErr *service.WorkspaceInitError
+	if !errors.As(err, &initErr) {
+		t.Fatalf("InitializeWorkspace() error = %T, want *service.WorkspaceInitError", err)
+	}
+	if initErr.Code != service.WorkspaceInitPartialLayout {
+		t.Fatalf("WorkspaceInitError.Code = %q, want %q", initErr.Code, service.WorkspaceInitPartialLayout)
 	}
 }

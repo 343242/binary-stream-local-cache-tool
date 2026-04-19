@@ -15,11 +15,16 @@ import (
 )
 
 func TestDesktopService(t *testing.T) {
+	t.Run("TestInitializeWorkspaceMakesWorkspaceInspectable", runTestInitializeWorkspaceMakesWorkspaceInspectable)
 	t.Run("TestListCursorsScansReplayDirectory", runTestListCursorsScansReplayDirectory)
 	t.Run("TestGetSegmentDetailCountsBlocksFromSegmentData", runTestGetSegmentDetailCountsBlocksFromSegmentData)
 	t.Run("TestListSegmentsIncludesSpecFieldsAndPagination", runTestListSegmentsIncludesSpecFieldsAndPagination)
 	t.Run("TestGetWALAndCheckpointDetailExposeReadOnlyContracts", runTestGetWALAndCheckpointDetailExposeReadOnlyContracts)
 	t.Run("TestGetCursorDetailReportsBackupStatus", runTestGetCursorDetailReportsBackupStatus)
+}
+
+func TestInitializeWorkspaceMakesWorkspaceInspectable(t *testing.T) {
+	runTestInitializeWorkspaceMakesWorkspaceInspectable(t)
 }
 
 func TestListCursorsScansReplayDirectory(t *testing.T) {
@@ -40,6 +45,31 @@ func TestGetWALAndCheckpointDetailExposeReadOnlyContracts(t *testing.T) {
 
 func TestGetCursorDetailReportsBackupStatus(t *testing.T) {
 	runTestGetCursorDetailReportsBackupStatus(t)
+}
+
+func runTestInitializeWorkspaceMakesWorkspaceInspectable(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "cache-root")
+
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatalf("InitializeWorkspace() error = %v", err)
+	}
+
+	state, err := service.OpenWorkspace(root)
+	if err != nil {
+		t.Fatalf("OpenWorkspace() error = %v", err)
+	}
+	if state.Mode != "HealthyObserver" {
+		t.Fatalf("Mode = %q, want %q", state.Mode, "HealthyObserver")
+	}
+	if state.Health != "ok" {
+		t.Fatalf("Health = %q, want %q", state.Health, "ok")
+	}
+	if state.RootPath != root {
+		t.Fatalf("RootPath = %q, want %q", state.RootPath, root)
+	}
 }
 
 func runTestListCursorsScansReplayDirectory(t *testing.T) {
@@ -339,10 +369,8 @@ func makeDesktopWorkspaceRoot(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	for _, rel := range []string{"meta", "meta/replay", "segments", "wal"} {
-		if err := os.MkdirAll(filepath.Join(root, rel), 0o755); err != nil {
-			t.Fatalf("MkdirAll(%q) error = %v", rel, err)
-		}
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatalf("InitializeWorkspace() error = %v", err)
 	}
 	return root
 }
