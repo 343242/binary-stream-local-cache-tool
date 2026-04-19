@@ -31,12 +31,15 @@ type WriterHost interface {
 
 type host struct {
 	mu            sync.RWMutex
+	submitMu      sync.Mutex
+	submitWG      sync.WaitGroup
 	engine        *cache.StorageEngine
 	status        WriterStatus
 	events        *EventFeed
 	queue         chan []core.RawRecord
 	queueCapacity int
 	stopCh        chan struct{}
+	stopSignaled  bool
 	workerCh      chan struct{}
 }
 
@@ -63,6 +66,8 @@ func NewHostWithQueueCapacity(capacity int) *host {
 		queue: make(chan []core.RawRecord, capacity),
 	}
 }
+
+var errWriterNotRunning = errors.New("writer host is not running")
 
 func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 	ctx = normalizeContext(ctx)
@@ -103,6 +108,7 @@ func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 	h.mu.Lock()
 	h.engine = engine
 	h.stopCh = stopCh
+	h.stopSignaled = false
 	h.workerCh = workerCh
 	h.status = WriterStatus{
 		LifecycleState:  string(LifecycleRunning),
@@ -123,10 +129,10 @@ func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 func (h *host) Stop(ctx context.Context) error {
 	ctx = normalizeContext(ctx)
 
+	h.submitMu.Lock()
 	h.mu.Lock()
 	engine := h.engine
 	stopCh := h.stopCh
-	workerCh := h.workerCh
 	root := h.status.RootPath
 	startedAtUnixMs := h.status.StartedAtUnixMs
 	if engine == nil {
@@ -135,16 +141,42 @@ func (h *host) Stop(ctx context.Context) error {
 		h.status.StoppedAtUnixMs = time.Now().UnixMilli()
 		h.queue = make(chan []core.RawRecord, h.queueCapacity)
 		h.mu.Unlock()
+		h.submitMu.Unlock()
 		return nil
 	}
 	h.status.LifecycleState = string(LifecycleStopping)
-	h.stopCh = nil
-	h.workerCh = nil
+	stopAlreadySignaled := h.stopSignaled
 	h.mu.Unlock()
 
-	if stopCh != nil {
-		close(stopCh)
+	submitDone := make(chan struct{})
+	go func() {
+		h.submitWG.Wait()
+		close(submitDone)
+	}()
+
+	select {
+	case <-submitDone:
+	case <-ctx.Done():
+		h.mu.Lock()
+		h.status.LastError = ctx.Err().Error()
+		h.mu.Unlock()
+		h.submitMu.Unlock()
+		h.events.Emit(Event{
+			Kind:    "writer-stop-warning",
+			Message: fmt.Sprintf("Writer stop interrupted: %v", ctx.Err()),
+		})
+		return ctx.Err()
 	}
+
+	if stopCh != nil && !stopAlreadySignaled {
+		close(stopCh)
+		h.mu.Lock()
+		h.stopSignaled = true
+		h.mu.Unlock()
+	}
+	workerCh := h.workerCh
+	h.submitMu.Unlock()
+
 	if workerCh != nil {
 		select {
 		case <-workerCh:
@@ -172,6 +204,9 @@ func (h *host) Stop(ctx context.Context) error {
 
 	h.mu.Lock()
 	h.engine = nil
+	h.stopCh = nil
+	h.stopSignaled = false
+	h.workerCh = nil
 	h.queue = make(chan []core.RawRecord, h.queueCapacity)
 	h.status = WriterStatus{
 		LifecycleState:  string(LifecycleStopped),
@@ -200,9 +235,21 @@ func (h *host) Events() []Event {
 
 func (h *host) Submit(ctx context.Context, records []core.RawRecord) error {
 	ctx = normalizeContext(ctx)
+	h.submitMu.Lock()
+	h.mu.RLock()
+	queue := h.queue
+	running := h.engine != nil && h.status.LifecycleState == string(LifecycleRunning) && !h.stopSignaled
+	h.mu.RUnlock()
+	if !running {
+		h.submitMu.Unlock()
+		return errWriterNotRunning
+	}
+	h.submitWG.Add(1)
+	h.submitMu.Unlock()
+	defer h.submitWG.Done()
 
 	select {
-	case h.queue <- records:
+	case queue <- records:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -222,34 +269,56 @@ func (h *host) DebugQueueLenForTest() int {
 	return len(h.queue)
 }
 
+func (h *host) DebugStopSignaledForTest() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.stopSignaled
+}
+
 func (h *host) runIngestionLoop(engine *cache.StorageEngine, queue <-chan []core.RawRecord, stopCh <-chan struct{}, workerCh chan<- struct{}) {
 	defer close(workerCh)
+	draining := false
 
 	for {
+		if draining {
+			select {
+			case records := <-queue:
+				h.writeQueuedBatch(engine, records)
+			default:
+				return
+			}
+			continue
+		}
+
 		select {
 		case <-stopCh:
-			return
+			draining = true
 		case records := <-queue:
-			if len(records) == 0 {
-				continue
-			}
-			result, err := engine.WriteBatch(context.Background(), records)
-			if err != nil {
-				h.mu.Lock()
-				h.status.LastError = fmt.Sprintf("write batch failed: %v", err)
-				h.mu.Unlock()
-				h.events.Emit(Event{
-					Kind:    "write-warning",
-					Message: fmt.Sprintf("Write batch failed: %v", err),
-				})
-				continue
-			}
-			h.events.Emit(Event{
-				Kind:    "batch-persisted",
-				Message: fmt.Sprintf("Persisted batch %d (%d records)", result.BatchSeq, result.RecordCount),
-			})
+			h.writeQueuedBatch(engine, records)
 		}
 	}
+}
+
+func (h *host) writeQueuedBatch(engine *cache.StorageEngine, records []core.RawRecord) {
+	if len(records) == 0 {
+		return
+	}
+
+	result, err := engine.WriteBatch(context.Background(), records)
+	if err != nil {
+		h.mu.Lock()
+		h.status.LastError = fmt.Sprintf("write batch failed: %v", err)
+		h.mu.Unlock()
+		h.events.Emit(Event{
+			Kind:    "write-warning",
+			Message: fmt.Sprintf("Write batch failed: %v", err),
+		})
+		return
+	}
+	h.events.Emit(Event{
+		Kind:    "batch-persisted",
+		Message: fmt.Sprintf("Persisted batch %d (%d records)", result.BatchSeq, result.RecordCount),
+	})
 }
 
 func (h *host) failStart(root string, err error) {

@@ -50,6 +50,38 @@ func TestWriterHostSubmitBlocksWhenQueueFull(t *testing.T) {
 	}
 }
 
+func TestWriterHostSubmitRejectsWhenNotRunning(t *testing.T) {
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+
+	host := writer.NewHostWithQueueCapacity(1)
+	records := []core.RawRecord{{EventTimeUnixMs: 1, Payload: []byte("x")}}
+
+	if err := host.Submit(context.Background(), records); err == nil {
+		t.Fatal("expected Submit() rejection before start")
+	}
+	if got := host.DebugQueueLenForTest(); got != 0 {
+		t.Fatalf("queue len before start = %d, want %d", got, 0)
+	}
+
+	cfg := core.DefaultConfig(root)
+	if err := host.Start(context.Background(), root, cfg); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := host.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	if err := host.Submit(context.Background(), records); err == nil {
+		t.Fatal("expected Submit() rejection after stop")
+	}
+	if got := host.DebugQueueLenForTest(); got != 0 {
+		t.Fatalf("queue len after stop = %d, want %d", got, 0)
+	}
+}
+
 func TestWriterHostStopFailurePreservesStoppingLifecycle(t *testing.T) {
 	root := t.TempDir()
 	if err := service.InitializeWorkspace(root); err != nil {
@@ -121,6 +153,74 @@ func TestWriterHostStartResetsQueueAcrossRestarts(t *testing.T) {
 	}
 	if err := host.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop(second) error = %v", err)
+	}
+}
+
+func TestWriterHostStopDrainsAcceptedBatches(t *testing.T) {
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+
+	host := writer.NewHostWithQueueCapacity(1)
+	cfg := core.DefaultConfig(root)
+	if err := host.Start(context.Background(), root, cfg); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	writeStarted := make(chan struct{}, 1)
+	releaseWrite := make(chan struct{})
+	cache.SetWriteBatchHookForTesting(func(stage string) {
+		if stage != "after_wal_append_before_segment" {
+			return
+		}
+		select {
+		case writeStarted <- struct{}{}:
+		default:
+		}
+		<-releaseWrite
+	})
+	defer cache.SetWriteBatchHookForTesting(nil)
+
+	if err := host.Submit(context.Background(), []core.RawRecord{{EventTimeUnixMs: 1, Payload: []byte("a")}}); err != nil {
+		t.Fatalf("Submit(first) error = %v", err)
+	}
+	<-writeStarted
+
+	if err := host.Submit(context.Background(), []core.RawRecord{{EventTimeUnixMs: 2, Payload: []byte("b")}}); err != nil {
+		t.Fatalf("Submit(second) error = %v", err)
+	}
+
+	stopErrCh := make(chan error, 1)
+	go func() {
+		stopErrCh <- host.Stop(context.Background())
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for !host.DebugStopSignaledForTest() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for stop signal")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(releaseWrite)
+	if err := <-stopErrCh; err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	engine, err := cache.Open(cache.DefaultConfig(root))
+	if err != nil {
+		t.Fatalf("Open(replay) error = %v", err)
+	}
+	defer engine.Close()
+
+	batch, err := engine.Replay(context.Background(), "writer-host-stop-drain", cache.ReplayLimit{MaxRecords: 10})
+	if err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if batch.RecordCount != 2 {
+		t.Fatalf("RecordCount = %d, want %d", batch.RecordCount, 2)
 	}
 }
 
