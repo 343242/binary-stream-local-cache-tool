@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	core "fastReadFile/internal/core"
 	"fastReadFile/internal/desktop/service"
 	"fastReadFile/internal/desktop/viewmodel"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -46,6 +47,10 @@ func (a *App) OpenWorkspace(rootPath string) (viewmodel.WorkspaceState, error) {
 		_ = addRecentWorkspace(rootPath)
 	}
 	return state, err
+}
+
+func (a *App) InitializeWorkspace(rootPath string) error {
+	return service.InitializeWorkspace(rootPath)
 }
 
 func (a *App) CloseWorkspace() error {
@@ -162,6 +167,14 @@ func (a *App) GetConfig() (viewmodel.Config, error) {
 		return viewmodel.Config{}, err
 	}
 	return service.GetConfig(root)
+}
+
+func (a *App) LoadPendingConfig(rootPath string) (service.PendingConfigFile, error) {
+	return service.LoadPendingConfig(rootPath)
+}
+
+func (a *App) SavePendingConfig(rootPath string, cfg core.Config) error {
+	return service.SavePendingConfig(rootPath, cfg)
 }
 
 func (a *App) StartTask(kind, target string, canCancel bool, cancel context.CancelFunc) (viewmodel.Task, error) {

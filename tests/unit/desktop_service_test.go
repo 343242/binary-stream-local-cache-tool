@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	core "fastReadFile/internal/core"
 	"fastReadFile/internal/desktop/service"
 	"fastReadFile/pkg/cache"
 )
@@ -20,6 +21,8 @@ func TestDesktopService(t *testing.T) {
 	t.Run("TestInitializeWorkspaceRejectsEmptyRoot", runTestInitializeWorkspaceRejectsEmptyRoot)
 	t.Run("TestInitializeWorkspaceRejectsFileRootAsInvalid", runTestInitializeWorkspaceRejectsFileRootAsInvalid)
 	t.Run("TestInitializeWorkspaceRejectsPartialLayout", runTestInitializeWorkspaceRejectsPartialLayout)
+	t.Run("TestPendingConfigDoesNotMutateRunningWriter", runTestPendingConfigDoesNotMutateRunningWriter)
+	t.Run("TestPendingConfigLoadsDefaultsWhenMissing", runTestPendingConfigLoadsDefaultsWhenMissing)
 }
 
 func TestOpenWorkspaceReturnsInvalidWorkspaceForEmptyDirectory(t *testing.T) {
@@ -48,6 +51,14 @@ func TestInitializeWorkspaceRejectsFileRootAsInvalid(t *testing.T) {
 
 func TestInitializeWorkspaceRejectsPartialLayout(t *testing.T) {
 	runTestInitializeWorkspaceRejectsPartialLayout(t)
+}
+
+func TestPendingConfigDoesNotMutateRunningWriter(t *testing.T) {
+	runTestPendingConfigDoesNotMutateRunningWriter(t)
+}
+
+func TestPendingConfigLoadsDefaultsWhenMissing(t *testing.T) {
+	runTestPendingConfigLoadsDefaultsWhenMissing(t)
 }
 
 func runTestOpenWorkspaceReturnsInvalidWorkspaceForEmptyDirectory(t *testing.T) {
@@ -194,6 +205,49 @@ func runTestInitializeWorkspaceRejectsPartialLayout(t *testing.T) {
 
 	err := service.InitializeWorkspace(root)
 	assertWorkspaceInitErrorCode(t, err, service.WorkspaceInitPartialLayout)
+}
+
+func runTestPendingConfigDoesNotMutateRunningWriter(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+
+	root := t.TempDir()
+	cfg := core.DefaultConfig(root)
+	cfg.RetentionDays = 21
+
+	if err := service.SavePendingConfig(root, cfg); err != nil {
+		t.Fatalf("SavePendingConfig() error = %v", err)
+	}
+	got, err := service.LoadPendingConfig(root)
+	if err != nil {
+		t.Fatalf("LoadPendingConfig() error = %v", err)
+	}
+	if got.Config.RetentionDays != cfg.RetentionDays {
+		t.Fatalf("RetentionDays = %d, want %d", got.Config.RetentionDays, cfg.RetentionDays)
+	}
+}
+
+func runTestPendingConfigLoadsDefaultsWhenMissing(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+
+	root := t.TempDir()
+
+	got, err := service.LoadPendingConfig(root)
+	if err != nil {
+		t.Fatalf("LoadPendingConfig() error = %v", err)
+	}
+
+	defaults := core.DefaultConfig(root)
+	if got.Root != root {
+		t.Fatalf("Root = %q, want %q", got.Root, root)
+	}
+	if got.Config.RootDir != root {
+		t.Fatalf("Config.RootDir = %q, want %q", got.Config.RootDir, root)
+	}
+	if got.Config.RetentionDays != defaults.RetentionDays {
+		t.Fatalf("RetentionDays = %d, want %d", got.Config.RetentionDays, defaults.RetentionDays)
+	}
 }
 
 func assertWorkspaceInitErrorCode(t *testing.T, err error, want service.WorkspaceInitCode) {

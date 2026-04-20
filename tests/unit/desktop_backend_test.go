@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"fastReadFile/desktop/backend"
+	core "fastReadFile/internal/core"
 	"fastReadFile/internal/desktop/service"
 	"fastReadFile/internal/desktop/writer"
 	"fastReadFile/internal/lock"
@@ -128,6 +130,55 @@ func TestDesktopBackendStopWriterRestoresObserverLock(t *testing.T) {
 	}
 	if status.RootPath != root {
 		t.Fatalf("WriterStatus.RootPath = %q, want %q", status.RootPath, root)
+	}
+}
+
+func TestPendingConfigAppBindingsKeepEffectiveConfigSeparate(t *testing.T) {
+	t.Parallel()
+
+	app := backend.NewApp()
+	root := makeBackendWorkspaceRoot(t)
+	if _, err := app.OpenWorkspace(root); err != nil {
+		t.Fatalf("OpenWorkspace() error = %v", err)
+	}
+
+	pending := core.DefaultConfig(root)
+	pending.RetentionDays = 14
+
+	if err := app.SavePendingConfig(root, pending); err != nil {
+		t.Fatalf("SavePendingConfig() error = %v", err)
+	}
+
+	got, err := app.LoadPendingConfig(root)
+	if err != nil {
+		t.Fatalf("LoadPendingConfig() error = %v", err)
+	}
+	if got.Config.RetentionDays != pending.RetentionDays {
+		t.Fatalf("pending RetentionDays = %d, want %d", got.Config.RetentionDays, pending.RetentionDays)
+	}
+
+	effective, err := app.GetConfig()
+	if err != nil {
+		t.Fatalf("GetConfig() error = %v", err)
+	}
+
+	wantEffective := strconv.Itoa(core.DefaultConfig(root).RetentionDays)
+	if effective.RetentionDays.CurrentValue != wantEffective {
+		t.Fatalf("effective RetentionDays = %q, want %q", effective.RetentionDays.CurrentValue, wantEffective)
+	}
+}
+
+func TestDesktopBackendInitializeWorkspaceBinding(t *testing.T) {
+	t.Parallel()
+
+	app := backend.NewApp()
+	root := filepath.Join(t.TempDir(), "cache-root")
+
+	if err := app.InitializeWorkspace(root); err != nil {
+		t.Fatalf("InitializeWorkspace() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "meta", "replay")); err != nil {
+		t.Fatalf("meta/replay missing after InitializeWorkspace(): %v", err)
 	}
 }
 
