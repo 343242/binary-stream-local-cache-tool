@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -52,13 +53,19 @@ func RunRepairTail(root string, segmentID uint64) (viewmodel.OperationResult, er
 	}, nil
 }
 
-func RunShutdown(root string) (viewmodel.OperationResult, error) {
+func RunShutdown(root string, stop func(context.Context) error) (viewmodel.OperationResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := stop(ctx); err != nil {
+		return viewmodel.OperationResult{}, err
+	}
+
 	return viewmodel.OperationResult{
-		Summary: "Shutdown handoff recorded",
+		Summary: "Writer shutdown completed",
 		Changed: true,
 		Details: []viewmodel.KeyValue{
 			{Key: "root", Value: root},
-			{Key: "status", Value: "requested"},
 		},
 	}, nil
 }

@@ -209,7 +209,9 @@ func (a *App) RunRepairTail(segmentID uint64) (viewmodel.Task, error) {
 
 func (a *App) RunShutdown() (viewmodel.Task, error) {
 	return a.runAsyncOperation("shutdown", "", false, func(root string) (viewmodel.OperationResult, error) {
-		return service.RunShutdown(root)
+		return service.RunShutdown(root, func(ctx context.Context) error {
+			return a.session.stopWriterWithContext(ctx)
+		})
 	})
 }
 

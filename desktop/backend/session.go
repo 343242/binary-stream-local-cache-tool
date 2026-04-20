@@ -261,9 +261,25 @@ func (s *Session) startWriter(rootPath string) error {
 }
 
 func (s *Session) stopWriter(timeout time.Duration) error {
+	ctx := context.Background()
+	cancel := func() {}
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.stopWriterAndRestoreLocked(ctx)
+}
 
+func (s *Session) stopWriterWithContext(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopWriterAndRestoreLocked(ctx)
+}
+
+func (s *Session) stopWriterAndRestoreLocked(ctx context.Context) error {
 	status := s.writerHost.Status()
 	switch status.LifecycleState {
 	case string(writer.LifecycleNotStarted), string(writer.LifecycleStopped):
@@ -280,12 +296,9 @@ func (s *Session) stopWriter(timeout time.Duration) error {
 		return nil
 	}
 
-	ctx := context.Background()
-	cancel := func() {}
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	defer cancel()
 
 	if err := s.writerHost.Stop(ctx); err != nil {
 		s.events.emit(EventWriterStatusChanged, s.writerHost.Status())

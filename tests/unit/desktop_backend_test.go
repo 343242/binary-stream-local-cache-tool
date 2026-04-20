@@ -133,6 +133,41 @@ func TestDesktopBackendStopWriterRestoresObserverLock(t *testing.T) {
 	}
 }
 
+func TestRunShutdownStopsActiveWriter(t *testing.T) {
+	t.Parallel()
+
+	app := backend.NewApp()
+	root := t.TempDir()
+	if err := service.InitializeWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.OpenWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.StartWriter(root); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.RunShutdown(); err != nil {
+		t.Fatalf("RunShutdown() error = %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		status, err := app.GetWriterStatus()
+		if err != nil {
+			t.Fatalf("GetWriterStatus() error = %v", err)
+		}
+		if status.LifecycleState == "stopped" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("LifecycleState = %q, want stopped", status.LifecycleState)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestPendingConfigAppBindingsKeepEffectiveConfigSeparate(t *testing.T) {
 	t.Parallel()
 
