@@ -19,6 +19,7 @@ type SidebarProps = {
 
 export default function Sidebar({ activePage, locale, workspace, onNavigate }: SidebarProps) {
   const m = getMessages(locale);
+  const hasWorkspace = Boolean(workspace);
   return (
     <aside aria-label={m.brand.workspace} className={styles.sidebar}>
       <div className={styles.brandBlock}>
@@ -38,11 +39,14 @@ export default function Sidebar({ activePage, locale, workspace, onNavigate }: S
         </strong>
       </section>
       <nav aria-label={m.brand.primaryNav} className={styles.navList}>
-        {items.map((item) => (
+        {items.map((item) => {
+          const isLocked = !hasWorkspace && item.key !== "home";
+
+          return (
           <button
             key={item.key}
-            aria-disabled={!workspace && item.key !== "home" && item.key !== "overview"}
-            className={`${styles.navButton} ${activePage === item.key ? styles.navButtonActive : ""} ${!workspace && item.key !== "home" && item.key !== "overview" ? styles.navButtonLocked : ""}`}
+            aria-disabled={isLocked}
+            className={`${styles.navButton} ${activePage === item.key ? styles.navButtonActive : ""} ${isLocked ? styles.navButtonLocked : ""}`}
             onClick={() => onNavigate(item.key)}
             type="button"
           >
@@ -56,7 +60,8 @@ export default function Sidebar({ activePage, locale, workspace, onNavigate }: S
                   ? m.nav.config
                   : m.nav.operations}
           </button>
-        ))}
+          );
+        })}
       </nav>
     </aside>
   );

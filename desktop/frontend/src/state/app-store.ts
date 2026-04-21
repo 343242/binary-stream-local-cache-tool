@@ -1464,7 +1464,7 @@ function createDemoConfigSections(locale: LocaleKey): Record<string, ConfigRow[]
 }
 
 function canAccessPage(state: ShellState, page: PageKey) {
-  if (page === "home" || page === "overview") {
+  if (page === "home") {
     return true;
   }
   return Boolean(state.workspace && state.workspace.mode !== "InvalidWorkspace");

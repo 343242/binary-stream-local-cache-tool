@@ -97,6 +97,9 @@ describe("desktop app pages", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("维护窗口")).toBeInTheDocument();
     expect(screen.getByText("近期活动")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "开始写入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "停止写入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "写入配置" })).not.toBeInTheDocument();
   });
 
   test("shows no segments empty state when explorer has zero rows", () => {
@@ -245,6 +248,15 @@ describe("desktop app pages", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "浏览器" }));
+
+    expect(screen.getByText("请先打开缓存目录")).toBeInTheDocument();
+    expect(screen.getByText("打开缓存目录")).toBeInTheDocument();
+  });
+
+  test("overview navigation stays gated until a workspace opens", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "概览" }));
 
     expect(screen.getByText("请先打开缓存目录")).toBeInTheDocument();
     expect(screen.getByText("打开缓存目录")).toBeInTheDocument();

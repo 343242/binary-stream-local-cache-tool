@@ -20,6 +20,11 @@ test("keeps Home available in the primary navigation", () => {
   expect(screen.getByRole("button", { name: "主页" })).toBeInTheDocument();
 });
 
+test("locks Overview until a workspace opens", () => {
+  render(<App />);
+  expect(screen.getByRole("button", { name: "概览" })).toHaveAttribute("aria-disabled", "true");
+});
+
 test("keeps the shell readable at narrow desktop widths", () => {
   window.innerWidth = 1180;
   render(<App />);
