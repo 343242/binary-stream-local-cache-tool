@@ -43,23 +43,23 @@ export default function Sidebar({ activePage, locale, workspace, onNavigate }: S
           const isLocked = !hasWorkspace && item.key !== "home";
 
           return (
-          <button
-            key={item.key}
-            aria-disabled={isLocked}
-            className={`${styles.navButton} ${activePage === item.key ? styles.navButtonActive : ""} ${isLocked ? styles.navButtonLocked : ""}`}
-            onClick={() => onNavigate(item.key)}
-            type="button"
-          >
-            {item.key === "home"
-              ? m.nav.home
-              : item.key === "overview"
-              ? m.nav.overview
-              : item.key === "explorer"
-                ? m.nav.explorer
-                : item.key === "config"
-                  ? m.nav.config
-                  : m.nav.operations}
-          </button>
+            <button
+              key={item.key}
+              aria-disabled={isLocked}
+              className={`${styles.navButton} ${activePage === item.key ? styles.navButtonActive : ""} ${isLocked ? styles.navButtonLocked : ""}`}
+              onClick={() => onNavigate(item.key)}
+              type="button"
+            >
+              {item.key === "home"
+                ? m.nav.home
+                : item.key === "overview"
+                  ? m.nav.overview
+                  : item.key === "explorer"
+                    ? m.nav.explorer
+                    : item.key === "config"
+                      ? m.nav.config
+                      : m.nav.operations}
+            </button>
           );
         })}
       </nav>
