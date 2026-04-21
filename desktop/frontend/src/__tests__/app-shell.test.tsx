@@ -15,6 +15,11 @@ test("renders the editorial shell landmarks", () => {
   expect(screen.getByRole("main")).toBeInTheDocument();
 });
 
+test("keeps Home available in the primary navigation", () => {
+  render(<App />);
+  expect(screen.getByRole("button", { name: "主页" })).toBeInTheDocument();
+});
+
 test("keeps the shell readable at narrow desktop widths", () => {
   window.innerWidth = 1180;
   render(<App />);

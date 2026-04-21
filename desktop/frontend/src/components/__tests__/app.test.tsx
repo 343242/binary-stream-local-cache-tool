@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import App from "../../App";
 import EmptyState from "../EmptyState";
@@ -171,6 +171,41 @@ describe("desktop app pages", () => {
     render(<App />);
     expect(screen.getByText("当前仅支持只读检查，持久化配置编辑仍然暂缓。")).toBeInTheDocument();
     expect(screen.getAllByText("允许范围").length).toBeGreaterThan(0);
+  });
+
+  test("defaults to Home when a workspace is open", () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+    });
+
+    render(<App />);
+
+    expect(screen.getByRole("heading", { level: 2, name: "本地写入控制" })).toBeInTheDocument();
+    expect(screen.queryByText("日常巡检保持可读，维护窗口保持足够严肃。")).not.toBeInTheDocument();
+  });
+
+  test("config page opens the writer-config modal", () => {
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "config" as any,
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "写入配置" }));
+
+    expect(screen.getByRole("dialog", { name: "写入配置" })).toBeInTheDocument();
   });
 
   it("marks config as read-only audit content", () => {
@@ -379,6 +414,55 @@ describe("desktop app pages", () => {
     render(<App />);
     fireEvent.click(screen.getByText("48"));
     await waitFor(() => expect(getSegmentDetail).toHaveBeenCalledWith(48));
+  });
+
+  test("writer runtime events update the home page without refresh", async () => {
+    const listeners: Record<string, (...payload: any[]) => void> = {};
+
+    (window as any).runtime = {
+      EventsOn: vi.fn((eventName: string, callback: (...payload: any[]) => void) => {
+        listeners[eventName] = callback;
+        return () => {
+          delete listeners[eventName];
+        };
+      }),
+    };
+
+    resetStore({
+      workspace: {
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        mode: "HealthyObserver",
+        lockMode: "ObserverShared",
+        health: "ok",
+        stale: false,
+      },
+      page: "home" as any,
+    });
+
+    render(<App />);
+
+    act(() => {
+      listeners["writer:status-changed"]?.({
+        lifecycleState: "running",
+        workspaceState: "HealthyWriter",
+        rootPath: "/var/lib/binary-stream/cache-alpha",
+        lastError: "",
+        startedAtUnixMs: 1713600000000,
+        stoppedAtUnixMs: 0,
+      });
+      listeners["writer:events-changed"]?.([
+        {
+          kind: "writer-started",
+          message: "Writer started for /var/lib/binary-stream/cache-alpha",
+          timestampUnixMs: 1713600000000,
+        },
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText((_, node) => node?.textContent === "写入器: 运行中")).toBeInTheDocument();
+      expect(screen.getByText("Writer started for /var/lib/binary-stream/cache-alpha")).toBeInTheDocument();
+    });
   });
 });
 

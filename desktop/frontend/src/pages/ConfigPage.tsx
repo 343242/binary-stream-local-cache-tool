@@ -7,9 +7,10 @@ import type { ConfigRow } from "../state/app-store";
 type ConfigPageProps = {
   hasWorkspace: boolean;
   sections: Record<string, ConfigRow[]>;
+  onOpenWriterConfig: () => void;
 };
 
-export default function ConfigPage({ hasWorkspace, sections }: ConfigPageProps) {
+export default function ConfigPage({ hasWorkspace, sections, onOpenWriterConfig }: ConfigPageProps) {
   const locale = useAppStore((state) => state.locale);
   const m = getMessages(locale);
   if (!hasWorkspace) {
@@ -35,6 +36,9 @@ export default function ConfigPage({ hasWorkspace, sections }: ConfigPageProps) 
           <div className={styles.badgeRow}>
             <span className={styles.badge}>{sectionCount} {m.config.sectionsCaptured}</span>
             <span className={styles.badge}>{fieldCount} {m.config.fieldsCaptured}</span>
+            <button className={`${styles.secondaryButton} ${styles.focusable}`} onClick={onOpenWriterConfig} type="button">
+              {m.home.configAction}
+            </button>
           </div>
         </div>
         <p className={styles.readonlyNote}>{m.config.readonly}</p>

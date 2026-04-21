@@ -41,6 +41,8 @@ type host struct {
 	stopCh        chan struct{}
 	stopSignaled  bool
 	workerCh      chan struct{}
+	statusListener func(WriterStatus)
+	eventsListener func([]Event)
 }
 
 var _ WriterHost = (*host)(nil)
@@ -85,6 +87,7 @@ func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 		RootPath:       root,
 	}
 	h.mu.Unlock()
+	h.notifyStatusListener()
 
 	if err := ctx.Err(); err != nil {
 		h.failStart(root, err)
@@ -117,9 +120,10 @@ func (h *host) Start(ctx context.Context, root string, cfg core.Config) error {
 		StartedAtUnixMs: time.Now().UnixMilli(),
 	}
 	h.mu.Unlock()
+	h.notifyStatusListener()
 
 	go h.runIngestionLoop(engine, queue, stopCh, workerCh)
-	h.events.Emit(Event{
+	h.emitEvent(Event{
 		Kind:    "writer-started",
 		Message: fmt.Sprintf("Writer started for %s", root),
 	})
@@ -141,12 +145,14 @@ func (h *host) Stop(ctx context.Context) error {
 		h.status.StoppedAtUnixMs = time.Now().UnixMilli()
 		h.queue = make(chan []core.RawRecord, h.queueCapacity)
 		h.mu.Unlock()
+		h.notifyStatusListener()
 		h.submitMu.Unlock()
 		return nil
 	}
 	h.status.LifecycleState = string(LifecycleStopping)
 	stopAlreadySignaled := h.stopSignaled
 	h.mu.Unlock()
+	h.notifyStatusListener()
 
 	submitDone := make(chan struct{})
 	go func() {
@@ -156,17 +162,18 @@ func (h *host) Stop(ctx context.Context) error {
 
 	select {
 	case <-submitDone:
-	case <-ctx.Done():
-		h.mu.Lock()
-		h.status.LastError = ctx.Err().Error()
-		h.mu.Unlock()
-		h.submitMu.Unlock()
-		h.events.Emit(Event{
-			Kind:    "writer-stop-warning",
-			Message: fmt.Sprintf("Writer stop interrupted: %v", ctx.Err()),
-		})
-		return ctx.Err()
-	}
+		case <-ctx.Done():
+			h.mu.Lock()
+			h.status.LastError = ctx.Err().Error()
+			h.mu.Unlock()
+			h.notifyStatusListener()
+			h.submitMu.Unlock()
+			h.emitEvent(Event{
+				Kind:    "writer-stop-warning",
+				Message: fmt.Sprintf("Writer stop interrupted: %v", ctx.Err()),
+			})
+			return ctx.Err()
+		}
 
 	if stopCh != nil && !stopAlreadySignaled {
 		close(stopCh)
@@ -184,7 +191,8 @@ func (h *host) Stop(ctx context.Context) error {
 			h.mu.Lock()
 			h.status.LastError = ctx.Err().Error()
 			h.mu.Unlock()
-			h.events.Emit(Event{
+			h.notifyStatusListener()
+			h.emitEvent(Event{
 				Kind:    "writer-stop-warning",
 				Message: fmt.Sprintf("Writer stop interrupted: %v", ctx.Err()),
 			})
@@ -195,7 +203,8 @@ func (h *host) Stop(ctx context.Context) error {
 		h.mu.Lock()
 		h.status.LastError = err.Error()
 		h.mu.Unlock()
-		h.events.Emit(Event{
+		h.notifyStatusListener()
+		h.emitEvent(Event{
 			Kind:    "writer-stop-warning",
 			Message: fmt.Sprintf("Writer shutdown failed: %v", err),
 		})
@@ -216,7 +225,8 @@ func (h *host) Stop(ctx context.Context) error {
 		StoppedAtUnixMs: time.Now().UnixMilli(),
 	}
 	h.mu.Unlock()
-	h.events.Emit(Event{
+	h.notifyStatusListener()
+	h.emitEvent(Event{
 		Kind:    "writer-stopped",
 		Message: fmt.Sprintf("Writer stopped for %s", root),
 	})
@@ -231,6 +241,18 @@ func (h *host) Status() WriterStatus {
 
 func (h *host) Events() []Event {
 	return h.events.Snapshot()
+}
+
+func (h *host) SetStatusListener(listener func(WriterStatus)) {
+	h.mu.Lock()
+	h.statusListener = listener
+	h.mu.Unlock()
+}
+
+func (h *host) SetEventsListener(listener func([]Event)) {
+	h.mu.Lock()
+	h.eventsListener = listener
+	h.mu.Unlock()
 }
 
 func (h *host) Submit(ctx context.Context, records []core.RawRecord) error {
@@ -309,13 +331,14 @@ func (h *host) writeQueuedBatch(engine *cache.StorageEngine, records []core.RawR
 		h.mu.Lock()
 		h.status.LastError = fmt.Sprintf("write batch failed: %v", err)
 		h.mu.Unlock()
-		h.events.Emit(Event{
+		h.notifyStatusListener()
+		h.emitEvent(Event{
 			Kind:    "write-warning",
 			Message: fmt.Sprintf("Write batch failed: %v", err),
 		})
 		return
 	}
-	h.events.Emit(Event{
+	h.emitEvent(Event{
 		Kind:    "batch-persisted",
 		Message: fmt.Sprintf("Persisted batch %d (%d records)", result.BatchSeq, result.RecordCount),
 	})
@@ -323,16 +346,38 @@ func (h *host) writeQueuedBatch(engine *cache.StorageEngine, records []core.RawR
 
 func (h *host) failStart(root string, err error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.status = WriterStatus{
 		LifecycleState: string(LifecycleStartFailed),
 		RootPath:       root,
 		LastError:      err.Error(),
 	}
-	h.events.Emit(Event{
+	h.mu.Unlock()
+	h.notifyStatusListener()
+	h.emitEvent(Event{
 		Kind:    "writer-start-failed",
 		Message: err.Error(),
 	})
+}
+
+func (h *host) notifyStatusListener() {
+	h.mu.RLock()
+	listener := h.statusListener
+	status := h.status
+	h.mu.RUnlock()
+	if listener != nil {
+		listener(status)
+	}
+}
+
+func (h *host) emitEvent(event Event) {
+	h.events.Emit(event)
+
+	h.mu.RLock()
+	listener := h.eventsListener
+	h.mu.RUnlock()
+	if listener != nil {
+		listener(h.events.Snapshot())
+	}
 }
 
 func normalizeContext(ctx context.Context) context.Context {

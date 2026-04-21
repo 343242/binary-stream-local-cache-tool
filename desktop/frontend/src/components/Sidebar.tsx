@@ -3,6 +3,7 @@ import { getMessages, localizeWorkspaceMode, type LocaleKey } from "../i18n";
 import type { PageKey, WorkspaceState } from "../state/app-store";
 
 const items: { key: PageKey; label: string }[] = [
+  { key: "home", label: "Home" },
   { key: "overview", label: "Overview" },
   { key: "explorer", label: "Explorer" },
   { key: "config", label: "Config" },
@@ -40,12 +41,14 @@ export default function Sidebar({ activePage, locale, workspace, onNavigate }: S
         {items.map((item) => (
           <button
             key={item.key}
-            aria-disabled={!workspace && item.key !== "overview"}
-            className={`${styles.navButton} ${activePage === item.key ? styles.navButtonActive : ""} ${!workspace && item.key !== "overview" ? styles.navButtonLocked : ""}`}
+            aria-disabled={!workspace && item.key !== "home" && item.key !== "overview"}
+            className={`${styles.navButton} ${activePage === item.key ? styles.navButtonActive : ""} ${!workspace && item.key !== "home" && item.key !== "overview" ? styles.navButtonLocked : ""}`}
             onClick={() => onNavigate(item.key)}
             type="button"
           >
-            {item.key === "overview"
+            {item.key === "home"
+              ? m.nav.home
+              : item.key === "overview"
               ? m.nav.overview
               : item.key === "explorer"
                 ? m.nav.explorer

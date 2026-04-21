@@ -4,9 +4,11 @@ import LoadingSkeleton from "./components/LoadingSkeleton";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import ToastRegion from "./components/ToastRegion";
+import WriterConfigModal from "./components/WriterConfigModal";
 import { getMessages, nextLocale } from "./i18n";
 import ConfigPage from "./pages/ConfigPage";
 import ExplorerPage from "./pages/ExplorerPage";
+import HomePage from "./pages/HomePage";
 import LandingPage from "./pages/LandingPage";
 import OperationsPage from "./pages/OperationsPage";
 import OverviewPage from "./pages/OverviewPage";
@@ -32,6 +34,13 @@ export default function App() {
     checkpointDetail,
     explorerDetailLoading,
     explorerDetailError,
+    writerStatus,
+    pendingConfig,
+    effectiveConfig,
+    writerEvents,
+    writerAlerts,
+    isWriterConfigModalOpen,
+    writerConfigSavePending,
     configSections,
     explorerTab,
     selectedOperation,
@@ -46,7 +55,12 @@ export default function App() {
     setSelectedCursor,
     setSelectedOperation,
     initialiseRuntime,
-    loadDemoWorkspace,
+    openWorkspace,
+    startWriter,
+    stopWriter,
+    openWriterConfig,
+    closeWriterConfig,
+    savePendingWriterConfig,
     refresh,
     requestOperation,
     confirmOperation,
@@ -72,6 +86,8 @@ export default function App() {
           locale={locale}
           onToggleLocale={() => setLocale(nextLocale(locale))}
           workspace={workspace}
+          writerStatus={writerStatus}
+          writerAlerts={writerAlerts}
           onRefresh={refresh}
           workspaceLoadState={workspaceLoadState}
         />
@@ -95,7 +111,18 @@ export default function App() {
                     }
                   : undefined
               }
-              onOpenWorkspace={loadDemoWorkspace}
+              onOpenWorkspace={openWorkspace}
+            />
+          ) : page === "home" ? (
+            <HomePage
+              locale={locale}
+              onOpenWriterConfig={openWriterConfig}
+              onStartWriter={() => void startWriter()}
+              onStopWriter={() => void stopWriter()}
+              workspace={workspace}
+              writerAlerts={writerAlerts}
+              writerEvents={writerEvents}
+              writerStatus={writerStatus}
             />
           ) : page === "overview" ? (
             <OverviewPage cards={overviewCards} warnings={warningSummary} segments={recentSegments} cursors={recentCursors} />
@@ -117,7 +144,7 @@ export default function App() {
               onSelectCursor={setSelectedCursor}
             />
           ) : page === "config" ? (
-            <ConfigPage hasWorkspace={Boolean(workspace)} sections={configSections} />
+            <ConfigPage hasWorkspace={Boolean(workspace)} onOpenWriterConfig={openWriterConfig} sections={configSections} />
           ) : (
             <OperationsPage
               workspace={workspace}
@@ -136,6 +163,16 @@ export default function App() {
           )}
         </div>
       </section>
+      <WriterConfigModal
+        effectiveConfig={effectiveConfig}
+        isOpen={isWriterConfigModalOpen}
+        isSaving={writerConfigSavePending}
+        locale={locale}
+        onClose={closeWriterConfig}
+        onSave={(config) => void savePendingWriterConfig(config)}
+        pendingConfig={pendingConfig}
+        writerStatus={writerStatus}
+      />
       <ToastRegion locale={locale} toasts={toasts} onDismiss={dismissToast} />
     </main>
   );

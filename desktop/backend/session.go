@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"fastReadFile/internal/core"
 	"fastReadFile/internal/desktop/service"
 	"fastReadFile/internal/desktop/viewmodel"
 	"fastReadFile/internal/desktop/writer"
@@ -28,16 +27,31 @@ type Session struct {
 }
 
 func newSession(events *eventBus, hooks Hooks) *Session {
-	return &Session{
+	host := writer.NewHost()
+	session := &Session{
 		state: viewmodel.WorkspaceState{
 			Mode:   "NoWorkspace",
 			Health: "N/A",
 		},
-		writerHost: writer.NewHost(),
+		writerHost: host,
 		tasks:      make(map[string]*taskRecord),
 		hooks:      hooks,
 		events:     events,
 	}
+	session.bindWriterRuntimeEvents(host)
+	return session
+}
+
+func (s *Session) bindWriterRuntimeEvents(host interface {
+	SetStatusListener(func(writer.WriterStatus))
+	SetEventsListener(func([]writer.Event))
+}) {
+	host.SetStatusListener(func(status writer.WriterStatus) {
+		s.events.emit(EventWriterStatusChanged, status)
+	})
+	host.SetEventsListener(func(events []writer.Event) {
+		s.events.emit(EventWriterEventsChanged, events)
+	})
 }
 
 func (s *Session) openWorkspace(root string) (viewmodel.WorkspaceState, error) {
@@ -233,6 +247,10 @@ func (s *Session) startWriter(rootPath string) error {
 	}
 
 	root := s.root
+	pending, err := service.LoadPendingConfig(root)
+	if err != nil {
+		return err
+	}
 	baseState := s.state
 	if err := s.releaseLockLocked(); err != nil {
 		return err
@@ -244,10 +262,9 @@ func (s *Session) startWriter(rootPath string) error {
 		return err
 	}
 
-	if err := s.writerHost.Start(context.Background(), root, core.DefaultConfig(root)); err != nil {
+	if err := s.writerHost.Start(context.Background(), root, pending.Config); err != nil {
 		_ = handle.Close()
 		s.restoreObserverLockLocked(baseState, "Unable to restore observer lock after writer start failure.")
-		s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 		s.events.emit(EventWorkspaceChanged, s.state)
 		return err
 	}
@@ -255,7 +272,6 @@ func (s *Session) startWriter(rootPath string) error {
 	s.lockHandle = handle
 	s.lockMode = lock.ModeWriterExclusive
 	s.state = writerState(baseState)
-	s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 	s.events.emit(EventWorkspaceChanged, s.state)
 	return nil
 }
@@ -292,7 +308,6 @@ func (s *Session) stopWriterAndRestoreLocked(ctx context.Context) error {
 				s.events.emit(EventWorkspaceChanged, s.state)
 			}
 		}
-		s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 		return nil
 	}
 
@@ -301,19 +316,16 @@ func (s *Session) stopWriterAndRestoreLocked(ctx context.Context) error {
 	}
 
 	if err := s.writerHost.Stop(ctx); err != nil {
-		s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 		return err
 	}
 
 	if err := s.releaseLockLocked(); err != nil {
-		s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 		return err
 	}
 
 	if s.root != "" && s.state.Mode != "InvalidWorkspace" {
 		s.restoreObserverLockLocked(s.state, "Unable to restore observer lock after writer shutdown.")
 	}
-	s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 	s.events.emit(EventWorkspaceChanged, s.state)
 	return nil
 }
@@ -361,10 +373,8 @@ func (s *Session) stopWriterLocked() error {
 	}
 
 	if err := s.writerHost.Stop(context.Background()); err != nil {
-		s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 		return err
 	}
-	s.events.emit(EventWriterStatusChanged, s.writerHost.Status())
 	return nil
 }
 

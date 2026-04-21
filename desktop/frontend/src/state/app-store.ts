@@ -7,18 +7,22 @@ import {
   type ConfigVM,
   type CursorDetailVM,
   type OverviewVM,
+  type PendingConfigFileVM,
   type PagedSegmentsVM,
   type SegmentDetailVM,
+  type WriterConfigVM,
+  type WriterStatusVM,
   type WALDetailVM,
   type WorkspaceState as BoundWorkspaceState,
 } from "../bindings";
 import { defaultLocale, formatMessage, getMessages, localizeConfigField, localizeConfigNote, localizeConfigSection, nextLocale, type LocaleKey } from "../i18n";
 import { hasRuntime, subscribeToEvent } from "../runtime";
 
-export type PageKey = "overview" | "explorer" | "config" | "operations";
+export type PageKey = "home" | "overview" | "explorer" | "config" | "operations";
 export type ExplorerTab = "segments" | "wal" | "cursors" | "checkpoint";
 export type OperationKey = "verify" | "close-check" | "repair-tail" | "shutdown";
 export type WorkspaceLoadState = "idle" | "choosing" | "hydrating" | "refreshing";
+export type WriterLifecycleState = "not-started" | "starting" | "running" | "stopping" | "stopped" | "start-failed";
 
 export type WorkspaceState = {
   rootPath: string;
@@ -62,6 +66,41 @@ export type ConfigRow = {
   defaultValue: string;
   allowedRange: string;
   note: string;
+};
+
+export type WriterConfigState = {
+  rootDir: string;
+  segmentTargetSizeBytes: number;
+  segmentSlackSizeBytes: number;
+  blockTargetSizeBytes: number;
+  checkpointInterval: number;
+  checkpointBytes: number;
+  segmentFsyncInterval: number;
+  segmentFsyncBytes: number;
+  retentionDays: number;
+};
+
+export type WriterStatusState = {
+  lifecycleState: string;
+  workspaceState: string;
+  rootPath: string;
+  lastError: string;
+  startedAtUnixMs: number;
+  stoppedAtUnixMs: number;
+};
+
+export type WriterEventVM = {
+  kind: string;
+  message: string;
+  timestampUnixMs: number;
+  timestampLabel: string;
+};
+
+export type WriterAlert = {
+  id: string;
+  level: "info" | "warning" | "error";
+  title: string;
+  message: string;
 };
 
 export type OperationResultState = {
@@ -124,6 +163,13 @@ type ShellState = {
   checkpointDetail: CheckpointDetailVM | null;
   explorerDetailLoading: boolean;
   explorerDetailError: string | null;
+  writerStatus: WriterStatusState;
+  pendingConfig: WriterConfigState;
+  effectiveConfig: WriterConfigState;
+  writerEvents: WriterEventVM[];
+  writerAlerts: WriterAlert[];
+  isWriterConfigModalOpen: boolean;
+  writerConfigSavePending: boolean;
   configSections: Record<string, ConfigRow[]>;
   selectedOperation: OperationKey;
   latestResult: OperationResultState | null;
@@ -138,9 +184,15 @@ type ShellState = {
   setSelectedSegment: (segment: SegmentRow) => void;
   setSelectedCursor: (cursor: CursorRow) => void;
   setSelectedOperation: (operation: OperationKey) => void;
-  loadDemoWorkspace: (rootPath?: string) => void;
+  openWorkspace: (rootPath?: string) => void;
+  initializeWorkspace: (rootPath: string) => Promise<void>;
   markInvalidWorkspace: (path: string, reason: string) => void;
   refresh: () => void;
+  startWriter: () => Promise<void>;
+  stopWriter: () => Promise<void>;
+  openWriterConfig: () => void;
+  closeWriterConfig: () => void;
+  savePendingWriterConfig: (config: WriterConfigState) => Promise<void>;
   requestOperation: (operation: OperationKey) => void;
   confirmOperation: () => void;
   dismissDialog: () => void;
@@ -190,9 +242,15 @@ export const createInitialState = (): Omit<
   | "setSelectedSegment"
   | "setSelectedCursor"
   | "setSelectedOperation"
-  | "loadDemoWorkspace"
+  | "openWorkspace"
+  | "initializeWorkspace"
   | "markInvalidWorkspace"
   | "refresh"
+  | "startWriter"
+  | "stopWriter"
+  | "openWriterConfig"
+  | "closeWriterConfig"
+  | "savePendingWriterConfig"
   | "requestOperation"
   | "confirmOperation"
   | "dismissDialog"
@@ -204,7 +262,7 @@ export const createInitialState = (): Omit<
 > => ({
   title: getMessages(defaultLocale).brand.product,
   locale: defaultLocale,
-  page: "overview",
+  page: "home",
   explorerTab: "segments",
   workspaceLoadState: "idle",
   workspace: null,
@@ -224,6 +282,13 @@ export const createInitialState = (): Omit<
   checkpointDetail: null,
   explorerDetailLoading: false,
   explorerDetailError: null,
+  writerStatus: createDefaultWriterStatus(),
+  pendingConfig: createDemoWriterConfig(),
+  effectiveConfig: createDemoWriterConfig(),
+  writerEvents: [],
+  writerAlerts: [],
+  isWriterConfigModalOpen: false,
+  writerConfigSavePending: false,
   configSections: createDemoConfigSections(defaultLocale),
   selectedOperation: "verify",
   latestResult: null,
@@ -240,7 +305,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
     set({ locale, title: getMessages(locale).brand.product });
     const workspace = get().workspace;
     if (hasBindings() && workspace?.rootPath && workspace.mode !== "InvalidWorkspace") {
-      void hydrateFromBindings(workspace.rootPath, set, "refreshing");
+      void refreshWorkspaceFromBindings(workspace.rootPath, set, "refreshing");
       return;
     }
     if (!hasBindings()) {
@@ -248,6 +313,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
         overviewCards: createDemoOverviewCards(locale),
         warningSummary: [createDemoWarning(locale)],
         configSections: createDemoConfigSections(locale),
+        writerAlerts: deriveWriterAlerts(locale, get().workspace, get().writerStatus, get().writerEvents),
       });
     }
   },
@@ -303,7 +369,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
     void loadCursorDetail(cursor, set);
   },
   setSelectedOperation: (operation) => set({ selectedOperation: operation }),
-  loadDemoWorkspace: (rootPath) => {
+  openWorkspace: (rootPath) => {
     if (hasBindings()) {
       if (rootPath) {
         void hydrateFromBindings(rootPath, set, "hydrating");
@@ -329,10 +395,24 @@ export const useAppStore = create<ShellState>((set, get) => ({
         health: "ok",
         stale: false,
       },
+      page: "home",
       overviewCards: createDemoOverviewCards(locale),
       warningSummary: [createDemoWarning(locale)],
+      writerStatus: createDefaultWriterStatus(rootPath ?? "/var/lib/binary-stream/cache-alpha"),
+      pendingConfig: createDemoWriterConfig(rootPath ?? "/var/lib/binary-stream/cache-alpha"),
+      effectiveConfig: createDemoWriterConfig(rootPath ?? "/var/lib/binary-stream/cache-alpha"),
+      writerEvents: [],
+      writerAlerts: [],
       configSections: createDemoConfigSections(locale),
     });
+  },
+  initializeWorkspace: async (rootPath) => {
+    if (hasBindings()) {
+      await bindings.initializeWorkspace(rootPath);
+      await get().openWorkspace(rootPath);
+      return;
+    }
+    get().openWorkspace(rootPath);
   },
   markInvalidWorkspace: (path, reason) =>
     set({
@@ -351,7 +431,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
       const workspace = get().workspace;
       if (workspace?.rootPath) {
         set({ workspaceLoadState: "refreshing" });
-        void hydrateFromBindings(workspace.rootPath, set, "refreshing");
+        void refreshWorkspaceFromBindings(workspace.rootPath, set, "refreshing");
         return;
       }
     }
@@ -359,6 +439,98 @@ export const useAppStore = create<ShellState>((set, get) => ({
       workspaceLoadState: "idle",
       workspace: state.workspace ? { ...state.workspace, stale: false } : state.workspace,
     }));
+  },
+  startWriter: async () => {
+    const workspace = get().workspace;
+    if (!workspace?.rootPath) {
+      return;
+    }
+    if (hasBindings()) {
+      await bindings.startWriter(workspace.rootPath);
+      return;
+    }
+    const now = Date.now();
+    const writerStatus = {
+      lifecycleState: "running",
+      workspaceState: "HealthyWriter",
+      rootPath: workspace.rootPath,
+      lastError: "",
+      startedAtUnixMs: now,
+      stoppedAtUnixMs: 0,
+    };
+    const writerEvents = [
+      ...get().writerEvents,
+      {
+        kind: "writer-started",
+        message: `Writer started for ${workspace.rootPath}`,
+        timestampUnixMs: now,
+        timestampLabel: formatTimestamp(now),
+      },
+    ].slice(-20);
+    set({
+      writerStatus,
+      writerEvents,
+      writerAlerts: deriveWriterAlerts(get().locale, workspace, writerStatus, writerEvents),
+    });
+  },
+  stopWriter: async () => {
+    const workspace = get().workspace;
+    if (!workspace?.rootPath) {
+      return;
+    }
+    if (hasBindings()) {
+      await bindings.stopWriter(30000);
+      return;
+    }
+    const now = Date.now();
+    const writerStatus = {
+      lifecycleState: "stopped",
+      workspaceState: "HealthyObserver",
+      rootPath: workspace.rootPath,
+      lastError: "",
+      startedAtUnixMs: get().writerStatus.startedAtUnixMs,
+      stoppedAtUnixMs: now,
+    };
+    const writerEvents = [
+      ...get().writerEvents,
+      {
+        kind: "writer-stopped",
+        message: `Writer stopped for ${workspace.rootPath}`,
+        timestampUnixMs: now,
+        timestampLabel: formatTimestamp(now),
+      },
+    ].slice(-20);
+    set({
+      writerStatus,
+      writerEvents,
+      writerAlerts: deriveWriterAlerts(get().locale, workspace, writerStatus, writerEvents),
+    });
+  },
+  openWriterConfig: () => set({ isWriterConfigModalOpen: true }),
+  closeWriterConfig: () => set({ isWriterConfigModalOpen: false }),
+  savePendingWriterConfig: async (config) => {
+    const workspace = get().workspace;
+    const rootPath = workspace?.rootPath || config.rootDir;
+    if (!rootPath) {
+      return;
+    }
+    set({ writerConfigSavePending: true });
+    if (hasBindings()) {
+      await bindings.savePendingConfig(rootPath, config);
+      const pending = await bindings.loadPendingConfig(rootPath);
+      const nextPending = mapPendingConfig(pending);
+      set({
+        pendingConfig: nextPending,
+        isWriterConfigModalOpen: false,
+        writerConfigSavePending: false,
+      });
+      return;
+    }
+    set({
+      pendingConfig: { ...config, rootDir: rootPath },
+      isWriterConfigModalOpen: false,
+      writerConfigSavePending: false,
+    });
   },
   requestOperation: (operation) => {
     const locale = get().locale;
@@ -447,7 +619,7 @@ export const useAppStore = create<ShellState>((set, get) => ({
       void bindings.getRecentWorkspaces().then((recentWorkspaces) => set({ recentWorkspaces })).catch(() => undefined);
       void bindings.getWorkspaceState().then((workspace) => {
         if (workspace.rootPath) {
-          void hydrateFromBindings(workspace.rootPath, set, "hydrating");
+          void refreshWorkspaceFromBindings(workspace.rootPath, set, "hydrating");
         }
       }).catch(() => undefined);
     }
@@ -460,10 +632,35 @@ export const useAppStore = create<ShellState>((set, get) => ({
             return;
           }
           const mapped = mapWorkspaceState(workspace as BoundWorkspaceState, get().workspace?.stale ?? false);
-          set({ workspace: mapped });
+          set({
+            workspace: mapped,
+            writerAlerts: deriveWriterAlerts(get().locale, mapped, get().writerStatus, get().writerEvents),
+          });
           if (mapped.rootPath && mapped.mode !== "InvalidWorkspace") {
-            void hydrateFromBindings(mapped.rootPath, set, "hydrating");
+            void refreshWorkspaceFromBindings(mapped.rootPath, set, "hydrating");
           }
+        }),
+        subscribeToEvent("writer:status-changed", (payload) => {
+          const status = pickPayload(payload);
+          if (!status || typeof status !== "object") {
+            return;
+          }
+          const mappedStatus = mapWriterStatus(status as WriterStatusVM);
+          set((state) => ({
+            writerStatus: mappedStatus,
+            writerAlerts: deriveWriterAlerts(state.locale, state.workspace, mappedStatus, state.writerEvents),
+          }));
+        }),
+        subscribeToEvent("writer:events-changed", (payload) => {
+          const events = pickEventListPayload(payload);
+          if (!Array.isArray(events)) {
+            return;
+          }
+          const mappedEvents = mapWriterEvents(events as Array<Record<string, unknown>>);
+          set((state) => ({
+            writerEvents: mappedEvents,
+            writerAlerts: deriveWriterAlerts(state.locale, state.workspace, state.writerStatus, mappedEvents),
+          }));
         }),
         subscribeToEvent("task:started", (payload) => {
           const task = pickPayload(payload);
@@ -527,50 +724,101 @@ async function hydrateFromBindings(
   });
   try {
     const workspace = await bindings.openWorkspace(rootPath);
-    if (workspace.mode === "InvalidWorkspace") {
-      set({
-        workspace: mapWorkspaceState(workspace),
-        workspaceLoadState: "idle",
-      });
+    await loadWorkspaceSnapshot(workspace, rootPath, set, workspaceLoadState);
+  } catch {
+    setDegradedWorkspace(rootPath, set);
+  }
+}
+
+async function refreshWorkspaceFromBindings(
+  rootPath: string,
+  set: typeof useAppStore.setState,
+  workspaceLoadState: WorkspaceLoadState,
+) {
+  set({ workspaceLoadState });
+  try {
+    const workspace = await bindings.getWorkspaceState();
+    if (!workspace.rootPath) {
+      set({ workspaceLoadState: "idle" });
       return;
     }
-
-    const [overview, segments, cursors, config] = await Promise.all([
-      bindings.getOverview(),
-      bindings.listSegments(1, 8),
-      bindings.listCursors(),
-      bindings.getConfig(),
-    ]);
-
-    set({
-      workspace: mapWorkspaceState(workspace, overview.isStale),
-      overviewCards: mapOverviewCards(overview, useAppStore.getState().locale),
-      warningSummary: overview.warnings.map((warning) => warning.message),
-      recentSegments: mapSegments(segments),
-      recentCursors: cursors.map((cursor) => ({
-        destination: cursor.destination,
-        writeSeq: cursor.writeSeq,
-        updatedAt: formatTimestamp(cursor.updatedAt),
-        status: cursor.status,
-      })),
-      configSections: mapConfigSections(useAppStore.getState().locale, config),
-      selectedSegment: null,
-      selectedCursor: null,
-      workspaceLoadState: "idle",
-    });
+    await loadWorkspaceSnapshot(workspace, rootPath, set, workspaceLoadState);
   } catch {
-    set({
-      workspaceLoadState: "idle",
-      workspace: {
-        rootPath,
-        mode: "DegradedReadOnly",
-        lockMode: "N/A",
-        health: "degraded",
-        stale: true,
-        invalidReason: getMessages(useAppStore.getState().locale).common.openWorkspaceFirstDetail,
-      },
-    });
+    setDegradedWorkspace(rootPath, set);
   }
+}
+
+async function loadWorkspaceSnapshot(
+  workspace: BoundWorkspaceState,
+  rootPath: string,
+  set: typeof useAppStore.setState,
+  _workspaceLoadState: WorkspaceLoadState,
+) {
+  if (workspace.mode === "InvalidWorkspace") {
+    set({
+      workspace: mapWorkspaceState(workspace),
+      workspaceLoadState: "idle",
+    });
+    return;
+  }
+
+  const [overview, segments, cursors, config, writerStatus, pending] = await Promise.all([
+    bindings.getOverview(),
+    bindings.listSegments(1, 8),
+    bindings.listCursors(),
+    bindings.getConfig(),
+    bindings.getWriterStatus(),
+    bindings.loadPendingConfig(rootPath),
+  ]);
+
+  const mappedWorkspace = mapWorkspaceState(workspace, overview.isStale);
+  const mappedStatus = mapWriterStatus(writerStatus);
+  const effectiveConfig = mapEffectiveConfig(config, rootPath);
+  const pendingConfig = mapPendingConfig(pending);
+  const writerEvents = useAppStore.getState().writerEvents;
+
+  set({
+    workspace: mappedWorkspace,
+    page: useAppStore.getState().page === "overview" ? "home" : useAppStore.getState().page,
+    overviewCards: mapOverviewCards(overview, useAppStore.getState().locale),
+    warningSummary: overview.warnings.map((warning) => warning.message),
+    recentSegments: mapSegments(segments),
+    recentCursors: cursors.map((cursor) => ({
+      destination: cursor.destination,
+      writeSeq: cursor.writeSeq,
+      updatedAt: formatTimestamp(cursor.updatedAt),
+      status: cursor.status,
+    })),
+    writerStatus: mappedStatus,
+    pendingConfig,
+    effectiveConfig,
+    writerAlerts: deriveWriterAlerts(useAppStore.getState().locale, mappedWorkspace, mappedStatus, writerEvents),
+    configSections: mapConfigSections(useAppStore.getState().locale, config),
+    selectedSegment: null,
+    selectedCursor: null,
+    workspaceLoadState: "idle",
+  });
+}
+
+function setDegradedWorkspace(rootPath: string, set: typeof useAppStore.setState) {
+  const degradedWorkspace: WorkspaceState = {
+    rootPath,
+    mode: "DegradedReadOnly",
+    lockMode: "N/A",
+    health: "degraded",
+    stale: true,
+    invalidReason: getMessages(useAppStore.getState().locale).common.openWorkspaceFirstDetail,
+  };
+  set({
+    workspaceLoadState: "idle",
+    workspace: degradedWorkspace,
+    writerAlerts: deriveWriterAlerts(
+      useAppStore.getState().locale,
+      degradedWorkspace,
+      useAppStore.getState().writerStatus,
+      useAppStore.getState().writerEvents,
+    ),
+  });
 }
 
 async function loadExplorerTabDetail(
@@ -755,11 +1003,140 @@ function mapConfigField(locale: LocaleKey, field: ConfigVM[keyof ConfigVM]): Con
   };
 }
 
+function mapWriterStatus(status: WriterStatusVM | Record<string, unknown>): WriterStatusState {
+  const record = status as Record<string, unknown>;
+  return {
+    lifecycleState: `${status.lifecycleState ?? record.LifecycleState ?? "not-started"}`,
+    workspaceState: `${status.workspaceState ?? record.WorkspaceState ?? ""}`,
+    rootPath: `${status.rootPath ?? record.RootPath ?? ""}`,
+    lastError: `${status.lastError ?? record.LastError ?? ""}`,
+    startedAtUnixMs: Number(status.startedAtUnixMs ?? record.StartedAtUnixMs ?? 0),
+    stoppedAtUnixMs: Number(status.stoppedAtUnixMs ?? record.StoppedAtUnixMs ?? 0),
+  };
+}
+
+function mapWriterEvents(events: Array<Record<string, unknown>>): WriterEventVM[] {
+  return events.slice(-20).map((event) => {
+    const timestampUnixMs = Number(event.timestampUnixMs ?? event.TimestampUnixMs ?? 0);
+    return {
+      kind: `${event.kind ?? event.Kind ?? ""}`,
+      message: `${event.message ?? event.Message ?? ""}`,
+      timestampUnixMs,
+      timestampLabel: formatTimestamp(timestampUnixMs),
+    };
+  });
+}
+
+function mapPendingConfig(payload: PendingConfigFileVM | Record<string, unknown>): WriterConfigState {
+  const config = ((payload as PendingConfigFileVM).config ?? (payload as { Config?: WriterConfigVM }).Config ?? createDemoWriterConfig()) as WriterConfigVM;
+  return {
+    rootDir: `${config.rootDir ?? (config as Record<string, unknown>).RootDir ?? ""}`,
+    segmentTargetSizeBytes: Number(config.segmentTargetSizeBytes ?? (config as Record<string, unknown>).SegmentTargetSizeBytes ?? 0),
+    segmentSlackSizeBytes: Number(config.segmentSlackSizeBytes ?? (config as Record<string, unknown>).SegmentSlackSizeBytes ?? 0),
+    blockTargetSizeBytes: Number(config.blockTargetSizeBytes ?? (config as Record<string, unknown>).BlockTargetSizeBytes ?? 0),
+    checkpointInterval: Number(config.checkpointInterval ?? (config as Record<string, unknown>).CheckpointInterval ?? 0),
+    checkpointBytes: Number(config.checkpointBytes ?? (config as Record<string, unknown>).CheckpointBytes ?? 0),
+    segmentFsyncInterval: Number(config.segmentFsyncInterval ?? (config as Record<string, unknown>).SegmentFsyncInterval ?? 0),
+    segmentFsyncBytes: Number(config.segmentFsyncBytes ?? (config as Record<string, unknown>).SegmentFsyncBytes ?? 0),
+    retentionDays: Number(config.retentionDays ?? (config as Record<string, unknown>).RetentionDays ?? 0),
+  };
+}
+
+function mapEffectiveConfig(config: ConfigVM, rootPath: string): WriterConfigState {
+  return {
+    rootDir: config.rootDir.currentValue || rootPath,
+    segmentTargetSizeBytes: parseIntegerValue(config.segmentTargetSizeBytes.currentValue),
+    segmentSlackSizeBytes: parseIntegerValue(config.segmentSlackSizeBytes.currentValue),
+    blockTargetSizeBytes: parseIntegerValue(config.blockTargetSizeBytes.currentValue),
+    checkpointInterval: parseDurationValue(config.checkpointInterval.currentValue),
+    checkpointBytes: parseIntegerValue(config.checkpointBytes.currentValue),
+    segmentFsyncInterval: parseDurationValue(config.segmentFsyncInterval.currentValue),
+    segmentFsyncBytes: parseIntegerValue(config.segmentFsyncBytes.currentValue),
+    retentionDays: parseIntegerValue(config.retentionDays.currentValue),
+  };
+}
+
 function formatTimestamp(value: number) {
   if (!value) {
     return "N/A";
   }
   return new Date(value).toISOString().replace("T", " ").slice(0, 16);
+}
+
+function createDefaultWriterStatus(rootPath = ""): WriterStatusState {
+  return {
+    lifecycleState: "not-started",
+    workspaceState: rootPath ? "HealthyObserver" : "",
+    rootPath,
+    lastError: "",
+    startedAtUnixMs: 0,
+    stoppedAtUnixMs: 0,
+  };
+}
+
+function createDemoWriterConfig(rootDir = "/var/lib/binary-stream/cache-alpha"): WriterConfigState {
+  return {
+    rootDir,
+    segmentTargetSizeBytes: 134217728,
+    segmentSlackSizeBytes: 4194304,
+    blockTargetSizeBytes: 1048576,
+    checkpointInterval: 5_000_000_000,
+    checkpointBytes: 67108864,
+    segmentFsyncInterval: 250_000_000,
+    segmentFsyncBytes: 8388608,
+    retentionDays: 14,
+  };
+}
+
+function deriveWriterAlerts(
+  locale: LocaleKey,
+  workspace: WorkspaceState | null,
+  writerStatus: WriterStatusState,
+  writerEvents: WriterEventVM[],
+): WriterAlert[] {
+  const alerts: WriterAlert[] = [];
+  if (!workspace?.rootPath) {
+    alerts.push({
+      id: "workspace-missing",
+      level: "info",
+      title: locale === "zh-CN" ? "尚未打开工作区" : "No workspace open",
+      message: locale === "zh-CN" ? "先打开或初始化一个本地缓存工作区，再进入写入控制。" : "Open or initialize a local cache workspace before using writer controls.",
+    });
+  }
+  if (workspace?.mode === "DegradedReadOnly") {
+    alerts.push({
+      id: "workspace-degraded",
+      level: "warning",
+      title: locale === "zh-CN" ? "工作区已降级" : "Workspace degraded",
+      message: workspace.invalidReason ?? (locale === "zh-CN" ? "当前工作区处于降级只读状态。" : "The workspace is currently degraded and read-only."),
+    });
+  }
+  if (writerStatus.lifecycleState === "running") {
+    alerts.push({
+      id: "writer-running",
+      level: "info",
+      title: locale === "zh-CN" ? "写入运行中" : "Writer running",
+      message: locale === "zh-CN" ? "写入器当前正在本地工作区中运行。" : "The writer is currently running in the local workspace.",
+    });
+  }
+  if (writerStatus.lastError) {
+    alerts.push({
+      id: "writer-error",
+      level: "error",
+      title: locale === "zh-CN" ? "写入出现错误" : "Writer error",
+      message: writerStatus.lastError,
+    });
+  }
+  const latestWarning = [...writerEvents].reverse().find((event) => event.kind.toLowerCase().includes("warning") || event.kind.toLowerCase().includes("failed"));
+  if (latestWarning) {
+    alerts.push({
+      id: "writer-event-warning",
+      level: latestWarning.kind.toLowerCase().includes("failed") ? "error" : "warning",
+      title: locale === "zh-CN" ? "最近写入事件" : "Latest writer event",
+      message: latestWarning.message,
+    });
+  }
+  return alerts;
 }
 
 function buildFallbackSegmentDetail(segment: SegmentRow): SegmentDetailVM {
@@ -1087,7 +1464,7 @@ function createDemoConfigSections(locale: LocaleKey): Record<string, ConfigRow[]
 }
 
 function canAccessPage(state: ShellState, page: PageKey) {
-  if (page === "overview") {
+  if (page === "home" || page === "overview") {
     return true;
   }
   return Boolean(state.workspace && state.workspace.mode !== "InvalidWorkspace");
@@ -1128,6 +1505,13 @@ function pickPayload(payload: unknown) {
   return payload;
 }
 
+function pickEventListPayload(payload: unknown) {
+  if (Array.isArray(payload) && payload.length === 1 && Array.isArray(payload[0])) {
+    return payload[0];
+  }
+  return payload;
+}
+
 function parseOptionalNumber(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -1149,4 +1533,34 @@ function mapTaskError(value: unknown): string | null {
   const record = value as Record<string, unknown>;
   const message = record.message ?? record.Message ?? record.title ?? record.Title;
   return typeof message === "string" && message !== "" ? message : null;
+}
+
+function parseIntegerValue(value: string) {
+  const normalized = value.replace(/,/g, "").trim();
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseDurationValue(value: string) {
+  const normalized = value.trim();
+  if (normalized === "") {
+    return 0;
+  }
+  const match = normalized.match(/^(\d+)(ms|s|m|h)$/);
+  if (!match) {
+    return Number(normalized);
+  }
+  const amount = Number(match[1]);
+  switch (match[2]) {
+    case "ms":
+      return amount * 1_000_000;
+    case "s":
+      return amount * 1_000_000_000;
+    case "m":
+      return amount * 60 * 1_000_000_000;
+    case "h":
+      return amount * 60 * 60 * 1_000_000_000;
+    default:
+      return 0;
+  }
 }

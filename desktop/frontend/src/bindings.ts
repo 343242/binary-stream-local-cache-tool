@@ -144,6 +144,32 @@ export type ConfigVM = {
   retentionDays: ConfigFieldVM;
 };
 
+export type WriterConfigVM = {
+  rootDir: string;
+  segmentTargetSizeBytes: number;
+  segmentSlackSizeBytes: number;
+  blockTargetSizeBytes: number;
+  checkpointInterval: number;
+  checkpointBytes: number;
+  segmentFsyncInterval: number;
+  segmentFsyncBytes: number;
+  retentionDays: number;
+};
+
+export type PendingConfigFileVM = {
+  root: string;
+  config: WriterConfigVM;
+};
+
+export type WriterStatusVM = {
+  lifecycleState: string;
+  workspaceState: string;
+  rootPath: string;
+  lastError: string;
+  startedAtUnixMs: number;
+  stoppedAtUnixMs: number;
+};
+
 export type GUIErrorVM = {
   code: string;
   title: string;
@@ -179,9 +205,13 @@ export type TaskVM = {
 
 type BackendBindings = {
   OpenWorkspace?: (rootPath: string) => Promise<WorkspaceState>;
+  InitializeWorkspace?: (rootPath: string) => Promise<void>;
   ChooseWorkspace?: () => Promise<WorkspaceState>;
   CloseWorkspace?: () => Promise<void>;
   GetWorkspaceState?: () => Promise<WorkspaceState>;
+  StartWriter?: (rootPath: string) => Promise<void>;
+  StopWriter?: (timeoutMs: number) => Promise<void>;
+  GetWriterStatus?: () => Promise<WriterStatusVM>;
   GetRecentWorkspaces?: () => Promise<string[]>;
   GetOverview?: () => Promise<OverviewVM>;
   ListSegments?: (page: number, pageSize: number) => Promise<PagedSegmentsVM>;
@@ -191,6 +221,8 @@ type BackendBindings = {
   GetCursorDetail?: (destination: string) => Promise<CursorDetailVM>;
   GetCheckpointDetail?: () => Promise<CheckpointDetailVM>;
   GetConfig?: () => Promise<ConfigVM>;
+  LoadPendingConfig?: (rootPath: string) => Promise<PendingConfigFileVM>;
+  SavePendingConfig?: (rootPath: string, cfg: WriterConfigVM) => Promise<void>;
   RunVerify?: () => Promise<TaskVM>;
   RunCloseCheck?: () => Promise<TaskVM>;
   RunRepairTail?: (segmentID: number) => Promise<TaskVM>;
@@ -220,6 +252,9 @@ export const bindings = {
   openWorkspace(rootPath: string) {
     return window.go?.backend?.App?.OpenWorkspace?.(rootPath) ?? missingBinding("OpenWorkspace");
   },
+  initializeWorkspace(rootPath: string) {
+    return window.go?.backend?.App?.InitializeWorkspace?.(rootPath) ?? missingBinding("InitializeWorkspace");
+  },
   chooseWorkspace() {
     return window.go?.backend?.App?.ChooseWorkspace?.() ?? missingBinding("ChooseWorkspace");
   },
@@ -228,6 +263,15 @@ export const bindings = {
   },
   getWorkspaceState() {
     return window.go?.backend?.App?.GetWorkspaceState?.() ?? missingBinding("GetWorkspaceState");
+  },
+  startWriter(rootPath: string) {
+    return window.go?.backend?.App?.StartWriter?.(rootPath) ?? missingBinding("StartWriter");
+  },
+  stopWriter(timeoutMs = 30000) {
+    return window.go?.backend?.App?.StopWriter?.(timeoutMs) ?? missingBinding("StopWriter");
+  },
+  getWriterStatus() {
+    return window.go?.backend?.App?.GetWriterStatus?.() ?? missingBinding("GetWriterStatus");
   },
   getRecentWorkspaces() {
     return window.go?.backend?.App?.GetRecentWorkspaces?.() ?? missingBinding("GetRecentWorkspaces");
@@ -255,6 +299,12 @@ export const bindings = {
   },
   getConfig() {
     return window.go?.backend?.App?.GetConfig?.() ?? missingBinding("GetConfig");
+  },
+  loadPendingConfig(rootPath: string) {
+    return window.go?.backend?.App?.LoadPendingConfig?.(rootPath) ?? missingBinding("LoadPendingConfig");
+  },
+  savePendingConfig(rootPath: string, cfg: WriterConfigVM) {
+    return window.go?.backend?.App?.SavePendingConfig?.(rootPath, cfg) ?? missingBinding("SavePendingConfig");
   },
   runVerify() {
     return window.go?.backend?.App?.RunVerify?.() ?? missingBinding("RunVerify");
