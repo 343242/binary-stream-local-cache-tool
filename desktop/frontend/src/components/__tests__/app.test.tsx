@@ -134,8 +134,8 @@ describe("desktop app pages", () => {
     render(<App />);
 
     expect(screen.getByText("详情面板")).toBeInTheDocument();
-    expect(screen.getByText("检查说明")).toBeInTheDocument();
-    expect(screen.getByText("选择一行后，可以在这里查看详细字段和原始预览数据。")).toBeInTheDocument();
+    expect(screen.getByText("详情")).toBeInTheDocument();
+    expect(screen.getByText("请选择一行。")).toBeInTheDocument();
   });
 
   it("keeps explorer audit copy visible when wal detail is unavailable", () => {
@@ -157,7 +157,7 @@ describe("desktop app pages", () => {
     render(<App />);
 
     expect(screen.getByText("当前没有 WAL")).toBeInTheDocument();
-    expect(screen.getByText("当前工作区没有可供检查的 WAL 快照。")).toBeInTheDocument();
+    expect(screen.getByText("没有 WAL 快照。")).toBeInTheDocument();
   });
 
   test("renders the config page as read-only", () => {
@@ -224,7 +224,7 @@ describe("desktop app pages", () => {
 
     render(<App />);
 
-    expect(screen.getByText("配置审计账本")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "配置" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "写入配置" })).toBeInTheDocument();
   });
 
@@ -373,7 +373,7 @@ describe("desktop app pages", () => {
       selectedSegment: null,
     });
     render(<App />);
-    expect(screen.getByText("选择一行后，可以在这里查看详细字段和原始预览数据。")).toBeInTheDocument();
+    expect(screen.getByText("请选择一行。")).toBeInTheDocument();
     fireEvent.click(screen.getByText("48"));
     await waitFor(() => {
       expect(screen.getByText("segments/48.seg")).toBeInTheDocument();
