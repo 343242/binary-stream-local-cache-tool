@@ -53,7 +53,7 @@ export const messages = {
     landing: {
       eyebrow: "起始页",
       title: "打开一个缓存根目录，再带着上下文进入检查流程。",
-      copy: "这是 phase-1 桌面控制台，用于缓存检查、重放诊断和受保护操作。默认以观测模式进入，日常检查保持可读，只有在确有需要时才有意升级到维护动作。",
+      copy: "在这里打开或初始化工作区，然后进入后续检查和操作流程。",
       supportedWorkspaceEyebrow: "支持的工作区",
       supportedWorkspaceTitle: "本界面可以打开什么",
       supportedWorkspaceCopy: "请选择包含 segment、WAL、cursor 和 checkpoint 结构的缓存根目录。不受支持的目录会停留在起始页，方便你安全地重新选择。",
@@ -89,8 +89,8 @@ export const messages = {
     },
     overview: {
       eyebrow: "概览",
-      title: "日常巡检保持可读，维护窗口保持足够严肃。",
-      copy: "phase-1 桌面控制台用于缓存检查、重放诊断和带门禁的操作。",
+      title: "工作区健康与容量概览",
+      copy: "查看当前工作区状态、容量、重放进度和告警。",
       prioritySnapshot: "优先快照",
       maintenanceEyebrow: "维护窗口",
       maintenanceTitle: "告警与操作员注意事项",
@@ -429,7 +429,7 @@ export const messages = {
     landing: {
       eyebrow: "Landing",
       title: "Open one cache root and move into inspection with context already in frame.",
-      copy: "Phase-1 desktop console for cache inspection, replay diagnostics, and guarded operations. Start in observer mode, keep the shell readable for routine checks, and escalate deliberately only when the shell calls for operator handoff.",
+      copy: "Open or initialize a workspace here before moving into inspection and operations.",
       supportedWorkspaceEyebrow: "Supported workspace",
       supportedWorkspaceTitle: "What this shell can open",
       supportedWorkspaceCopy: "Open a cache root that contains the expected segment, WAL, cursor, and checkpoint layout. Unsupported roots stay on the landing desk so you can choose another directory safely.",
@@ -465,8 +465,8 @@ export const messages = {
     },
     overview: {
       eyebrow: "Overview",
-      title: "Readable enough for routine checks. Severe enough for maintenance windows.",
-      copy: "Phase-1 desktop console for cache inspection, replay diagnostics, and guarded operations.",
+      title: "Workspace health and capacity overview",
+      copy: "Review current workspace state, capacity, replay progress, and warnings.",
       prioritySnapshot: "Priority snapshot",
       maintenanceEyebrow: "Maintenance windows",
       maintenanceTitle: "Warnings and operator cautions",

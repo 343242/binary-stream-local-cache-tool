@@ -92,7 +92,7 @@ describe("desktop app pages", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: "日常巡检保持可读，维护窗口保持足够严肃。",
+        name: "工作区健康与容量概览",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("维护窗口")).toBeInTheDocument();
