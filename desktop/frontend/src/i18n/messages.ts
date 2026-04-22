@@ -53,7 +53,7 @@ export const messages = {
     landing: {
       eyebrow: "起始页",
       title: "打开一个缓存根目录，再带着上下文进入检查流程。",
-      copy: "在这里打开或初始化工作区，然后进入后续检查和操作流程。",
+      copy: "",
       supportedWorkspaceEyebrow: "支持的工作区",
       supportedWorkspaceTitle: "本界面可以打开什么",
       supportedWorkspaceCopy: "请选择包含 segment、WAL、cursor 和 checkpoint 结构的缓存根目录。不受支持的目录会停留在起始页，方便你安全地重新选择。",
@@ -65,7 +65,7 @@ export const messages = {
     home: {
       eyebrow: "主页",
       title: "本地写入控制",
-      copy: "在这里处理写入生命周期、最近写入事件和操作提醒。所有启动、停止和配置意图都收敛在这一页。",
+      copy: "",
       emptyTitle: "先打开一个工作区",
       emptyCopy: "打开或初始化一个本地缓存工作区之后，主页才会显示写入控制。",
       statusLabel: "状态",
@@ -90,16 +90,16 @@ export const messages = {
     overview: {
       eyebrow: "概览",
       title: "工作区健康与容量概览",
-      copy: "查看当前工作区状态、容量、重放进度和告警。",
+      copy: "",
       prioritySnapshot: "优先快照",
       maintenanceEyebrow: "维护窗口",
       maintenanceTitle: "告警与操作员注意事项",
-      maintenanceCopy: "这里用于快速识别哪些问题会阻止日常检查继续进入修复或停机交接。",
+      maintenanceCopy: "",
       noWarningsTitle: "当前没有活跃告警",
       noWarningsCopy: "当前工作区可以在不升级权限的前提下进行读取检查。",
       activityEyebrow: "近期活动",
       activityTitle: "段文件与游标交接",
-      activityCopy: "在进入更深的浏览器或操作页面之前，先观察最近的写入表面和下游消费状态。",
+      activityCopy: "",
       recentSegments: "最近段文件",
       recentCursors: "最近游标",
       cards: {
@@ -114,7 +114,7 @@ export const messages = {
     explorer: {
       eyebrow: "浏览器审计视角",
       title: "行账本",
-      copy: "先在这里切换视角，再到右侧独立审计面板检查选中的记录。",
+      copy: "",
       detailEyebrow: "详情面板",
       detailTitle: "检查说明",
       tabs: {
@@ -151,10 +151,10 @@ export const messages = {
         noCheckpointDetail: "当前工作区没有可供审计的检查点快照。",
       },
       detailNotes: {
-        segments: "这里展示所选段文件行的只读检查字段。",
-        wal: "这里展示当前 WAL 快照的审计说明。",
-        cursors: "这里展示与行账本隔离的游标重放证据。",
-        checkpoint: "这里展示单独归档的检查点元数据。",
+        segments: "",
+        wal: "",
+        cursors: "",
+        checkpoint: "",
       },
       groups: {
         segmentIdentity: "段文件标识",
@@ -200,8 +200,8 @@ export const messages = {
       emptyCopy: "phase-1 的配置页面是只读的，只有打开有效工作区后才会显示。",
       eyebrow: "配置审计面板",
       title: "配置审计账本",
-      readonly: "当前仅支持只读检查，持久化配置编辑仍然暂缓。",
-      copy: "这里保留了当前值、启动默认值和允许范围，供操作员审计对照。",
+      readonly: "",
+      copy: "",
       sectionEyebrow: "审计分组",
       fieldsCaptured: "个字段",
       sectionsCaptured: "个分组",
@@ -218,7 +218,7 @@ export const messages = {
     writerConfig: {
       eyebrow: "启动配置",
       title: "写入配置",
-      copy: "这里编辑下一次启动写入器时使用的待启动配置，不会改写当前已运行实例。",
+      copy: "",
       blockedWhileRunning: "写入器正在运行或切换生命周期时，必须先停止后再调整下一次启动配置。",
       pendingSection: "待启动配置",
       effectiveSection: "当前生效配置",
@@ -314,7 +314,7 @@ export const messages = {
     },
     dialog: {
       impactReview: "影响审查",
-      reviewNote: "请在授权之前确认影响范围和维护姿态。",
+      reviewNote: "",
       accent: "提示",
       danger: "危险",
     },
@@ -429,7 +429,7 @@ export const messages = {
     landing: {
       eyebrow: "Landing",
       title: "Open one cache root and move into inspection with context already in frame.",
-      copy: "Open or initialize a workspace here before moving into inspection and operations.",
+      copy: "",
       supportedWorkspaceEyebrow: "Supported workspace",
       supportedWorkspaceTitle: "What this shell can open",
       supportedWorkspaceCopy: "Open a cache root that contains the expected segment, WAL, cursor, and checkpoint layout. Unsupported roots stay on the landing desk so you can choose another directory safely.",
@@ -441,7 +441,7 @@ export const messages = {
     home: {
       eyebrow: "Home",
       title: "Local writer control",
-      copy: "Use this page for writer lifecycle control, recent writer events, and operator alerts. Start, stop, and config intent all stay here.",
+      copy: "",
       emptyTitle: "Open a workspace first",
       emptyCopy: "Home shows writer controls only after a local cache workspace is open or initialized.",
       statusLabel: "Status",
@@ -466,16 +466,16 @@ export const messages = {
     overview: {
       eyebrow: "Overview",
       title: "Workspace health and capacity overview",
-      copy: "Review current workspace state, capacity, replay progress, and warnings.",
+      copy: "",
       prioritySnapshot: "Priority snapshot",
       maintenanceEyebrow: "Maintenance windows",
       maintenanceTitle: "Warnings and operator cautions",
-      maintenanceCopy: "Use this region to spot the items that would block a routine inspection from becoming a repair or shutdown handoff.",
+      maintenanceCopy: "",
       noWarningsTitle: "No active warnings",
       noWarningsCopy: "The current workspace is readable without escalations or pending repair cues.",
       activityEyebrow: "Recent activity",
       activityTitle: "Segments and cursor handoff",
-      activityCopy: "Track the latest write surfaces and downstream consumers before moving into deeper explorer or operations work.",
+      activityCopy: "",
       recentSegments: "Recent Segments",
       recentCursors: "Recent Cursors",
       cards: {
@@ -490,7 +490,7 @@ export const messages = {
     explorer: {
       eyebrow: "Explorer audit lens",
       title: "Row ledger",
-      copy: "Switch lenses here, then inspect the selected record in the separate audit surface.",
+      copy: "",
       detailEyebrow: "Detail pane",
       detailTitle: "Inspection notes",
       tabs: {
@@ -527,10 +527,10 @@ export const messages = {
         noCheckpointDetail: "No checkpoint snapshot is available for audit in this workspace.",
       },
       detailNotes: {
-        segments: "Read-only inspection fields for the selected segment row.",
-        wal: "Audit notes for the current write-ahead log snapshot.",
-        cursors: "Replay cursor evidence remains isolated from the row ledger.",
-        checkpoint: "Checkpoint metadata is grouped here as a separate audit surface.",
+        segments: "",
+        wal: "",
+        cursors: "",
+        checkpoint: "",
       },
       groups: {
         segmentIdentity: "Segment identity",
@@ -576,8 +576,8 @@ export const messages = {
       emptyCopy: "Phase-1 configuration is read-only and only becomes available after a valid workspace opens.",
       eyebrow: "Configuration audit surface",
       title: "Configuration audit ledger",
-      readonly: "Read-only inspection. Persistent configuration editing is deferred.",
-      copy: "Effective values, startup defaults, and allowed ranges are preserved here as an audit ledger for operator review.",
+      readonly: "",
+      copy: "",
       sectionEyebrow: "Audit section",
       fieldsCaptured: "fields",
       sectionsCaptured: "sections",
@@ -594,7 +594,7 @@ export const messages = {
     writerConfig: {
       eyebrow: "Startup config",
       title: "Writer Config",
-      copy: "Edit the pending startup config used by the next writer start without mutating the currently running instance.",
+      copy: "",
       blockedWhileRunning: "Stop the writer before changing the pending startup config.",
       pendingSection: "Pending startup config",
       effectiveSection: "Current effective config",
@@ -667,7 +667,7 @@ export const messages = {
     task: {
       eyebrow: "Task timeline",
       title: "Task timeline",
-      empty: "No task has been requested from this desk yet.",
+      empty: "",
       requested: "Requested",
       inProgress: "In progress",
       failed: "Failed",
@@ -690,15 +690,15 @@ export const messages = {
     },
     dialog: {
       impactReview: "Impact review",
-      reviewNote: "Review the impact and maintenance posture before you authorise the action.",
+      reviewNote: "",
       accent: "accent",
       danger: "danger",
     },
     toast: {
       ariaLabel: "Notifications",
-      deskNotice: "Desk notice",
+      deskNotice: "",
       completedAction: "Completed action",
-      auditNotice: "Audit notice",
+      auditNotice: "",
       levels: {
         info: "info",
         success: "success",
@@ -707,7 +707,7 @@ export const messages = {
       },
     },
     emptyState: {
-      inspectionNote: "Inspection note",
+      inspectionNote: "",
     },
     enums: {
       workspaceMode: {

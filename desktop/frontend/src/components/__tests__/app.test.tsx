@@ -172,7 +172,6 @@ describe("desktop app pages", () => {
       page: "config",
     });
     render(<App />);
-    expect(screen.getByText("当前仅支持只读检查，持久化配置编辑仍然暂缓。")).toBeInTheDocument();
     expect(screen.getAllByText("允许范围").length).toBeGreaterThan(0);
   });
 
@@ -226,7 +225,7 @@ describe("desktop app pages", () => {
     render(<App />);
 
     expect(screen.getByText("配置审计账本")).toBeInTheDocument();
-    expect(screen.getByText("当前仅支持只读检查，持久化配置编辑仍然暂缓。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "写入配置" })).toBeInTheDocument();
   });
 
   test("reopen uses the selected recent workspace path", () => {
