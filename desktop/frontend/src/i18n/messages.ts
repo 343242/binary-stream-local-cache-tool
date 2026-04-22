@@ -206,7 +206,7 @@ export const messages = {
       fieldsCaptured: "个字段",
       sectionsCaptured: "个分组",
       sectionLedgerSuffix: "账本",
-      sectionCopy: "这里展示用于审计比较和维护复核的启动期捕获值。",
+      sectionCopy: "这里展示当前配置值。",
       table: {
         setting: "配置项",
         effective: "当前快照",
@@ -582,7 +582,7 @@ export const messages = {
       fieldsCaptured: "fields",
       sectionsCaptured: "sections",
       sectionLedgerSuffix: "ledger",
-      sectionCopy: "Captured startup-only values for audit comparison and maintenance review.",
+      sectionCopy: "Current config values are shown here.",
       table: {
         setting: "Setting",
         effective: "Effective Snapshot",
